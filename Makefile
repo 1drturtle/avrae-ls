@@ -13,7 +13,7 @@ lint:
 	$(UV) run ruff check $(PY_SOURCES)
 
 test:
-	$(UV) run pytest tests
+	$(UV) run pytest tests --cov=src
 
 check: lint test
 

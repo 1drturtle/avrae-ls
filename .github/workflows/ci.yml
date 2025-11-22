@@ -19,4 +19,4 @@ jobs:
       - name: Lint
         run: uv run ruff check .
       - name: Tests
-        run: uv run pytest
+        run: uv run pytest --cov=src
