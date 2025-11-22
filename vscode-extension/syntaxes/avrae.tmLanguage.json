@@ -1,0 +1,38 @@
+{
+  "name": "Avrae Alias",
+  "scopeName": "source.avrae",
+  "patterns": [
+    {
+      "name": "meta.command.avrae",
+      "match": "^!alias\\b.*$"
+    },
+    {
+      "name": "meta.embedded.draconic",
+      "begin": "<drac2>",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.begin.avrae"
+        }
+      },
+      "end": "</drac2>",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.embedded.end.avrae"
+        }
+      },
+      "patterns": [
+        {
+          "include": "source.python"
+        }
+      ]
+    },
+    {
+      "name": "string.interpolated.roll.avrae",
+      "match": "\\{[^\\n{}]*\\}"
+    }
+  ],
+  "fileTypes": [
+    "alias"
+  ],
+  "uuid": "d13b6ce9-2e66-413f-9151-8b03f4276f30"
+}

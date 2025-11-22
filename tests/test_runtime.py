@@ -1,0 +1,300 @@
+import pytest
+
+from avrae_ls.config import VarSources
+from avrae_ls.context import ContextData, GVarResolver
+from avrae_ls.runtime import MockExecutor
+
+
+def _ctx():
+    return ContextData(vars=VarSources())
+
+
+def _resolver(tmp_path):
+    from avrae_ls.config import AvraeLSConfig
+
+    cfg = AvraeLSConfig.default(tmp_path)
+    res = GVarResolver(cfg)
+    res.reset({"foo": "bar"})
+    return res
+
+
+@pytest.mark.asyncio
+async def test_mock_executor_runs_code(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run("x = 1\nx + 2", ctx, resolver)
+    assert result.error is None
+    assert result.value == 3
+    assert result.stdout == ""
+
+
+@pytest.mark.asyncio
+async def test_mock_executor_resolves_gvars(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run("get_gvar('foo')", ctx, resolver)
+    assert result.error is None
+    assert result.value == "bar"
+
+
+@pytest.mark.asyncio
+async def test_alias_block_executes(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+    from avrae_ls.parser import primary_block_or_source
+
+    alias_text = "!alias hello echo\n<drac2>\nx = 3\nreturn x\n</drac2>"
+    code, _, _ = primary_block_or_source(alias_text)
+    result = await executor.run(code, ctx, resolver)
+    assert result.error is None
+    assert result.value == 3
+
+
+@pytest.mark.asyncio
+async def test_argparse_available(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+    result = await executor.run("pa = argparse('one two'); pa.get('one')", ctx, resolver)
+    assert result.error is None
+
+
+@pytest.mark.asyncio
+async def test_err_raises_alias_exception(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+    result = await executor.run("err('boom')", ctx, resolver)
+    assert result.error is not None
+    assert "boom" in str(result.error)
+
+
+@pytest.mark.asyncio
+async def test_consumables_list_safe(tmp_path):
+    executor = MockExecutor()
+    ctx = ContextData(character={"consumables": {"Ki": {"name": "Ki", "value": 3, "max": 5}}}, vars=VarSources())
+    resolver = _resolver(tmp_path)
+    result = await executor.run("x=character(); x.consumables", ctx, resolver)
+    assert result.error is None
+    assert result.value is not None
+    first = list(result.value)[0]
+    assert getattr(first, "name") == "Ki"
+
+
+@pytest.mark.asyncio
+async def test_actions_list_safe(tmp_path):
+    executor = MockExecutor()
+    ctx = ContextData(
+        character={
+            "actions": [
+                {"name": "Second Wind", "activation_type": 3, "activation_type_name": "BONUS_ACTION", "description": "+1d10+5"}
+            ]
+        },
+        vars=VarSources(),
+    )
+    resolver = _resolver(tmp_path)
+    result = await executor.run("x=character(); x.actions", ctx, resolver)
+    assert result.error is None
+    actions = list(result.value)
+    assert actions and actions[0].name == "Second Wind"
+
+
+@pytest.mark.asyncio
+async def test_character_attributes_accessible(tmp_path):
+    executor = MockExecutor()
+    ctx = ContextData(
+        character={
+            "name": "A",
+            "stats": {"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            "levels": {"Fighter": 1},
+            "attacks": [{"name": "Punch"}],
+            "skills": {"athletics": {"value": 2}},
+            "saves": {"str": 2},
+            "resistances": {"resist": [], "vuln": [], "immune": [], "neutral": []},
+            "ac": 10,
+            "max_hp": 10,
+            "hp": 10,
+            "temp_hp": 0,
+            "spellbook": {"spells": []},
+            "creature_type": "humanoid",
+            "actions": [{"name": "Action"}],
+            "coinpurse": {"gp": 1},
+            "csettings": {},
+            "race": "Human",
+            "background": "Soldier",
+            "owner": 1,
+            "upstream": "up",
+            "cvars": {"foo": "bar"},
+            "consumables": {"Ki": {"name": "Ki", "value": 1, "max": 1}},
+            "death_saves": {"successes": 0, "fails": 0},
+            "description": "",
+            "image": "",
+        },
+        vars=VarSources(),
+    )
+    resolver = _resolver(tmp_path)
+    code = "\n".join(
+        [
+            "x=character()",
+            "x.name",
+            "x.stats",
+            "x.levels",
+            "x.attacks",
+            "x.skills",
+            "x.saves",
+            "x.resistances",
+            "x.ac",
+            "x.max_hp",
+            "x.hp",
+            "x.temp_hp",
+            "x.spellbook",
+            "x.creature_type",
+            "x.actions",
+            "x.coinpurse",
+            "x.csettings",
+            "x.race",
+            "x.background",
+            "x.owner",
+            "x.upstream",
+            "x.cvars",
+            "x.consumables",
+            "x.death_saves",
+            "x.description",
+            "x.image",
+        ]
+    )
+    result = await executor.run(code, ctx, resolver)
+    assert result.error is None
+
+
+@pytest.mark.asyncio
+async def test_combat_combatants_executes(tmp_path):
+    from avrae_ls.config import AvraeLSConfig
+    from avrae_ls.context import ContextBuilder
+
+    cfg = AvraeLSConfig.default(tmp_path)
+    ctx = ContextBuilder(cfg).build()
+    resolver = _resolver(tmp_path)
+    executor = MockExecutor()
+
+    result = await executor.run("combat().combatants", ctx, resolver)
+    assert result.error is None
+    from collections.abc import Sequence
+
+    assert isinstance(result.value, Sequence)
+    assert len(result.value) == 2
+
+
+class _EnsuringResolver(GVarResolver):
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.calls: list[str] = []
+
+    async def ensure(self, key: str) -> bool:
+        self.calls.append(str(key))
+        self._cache[str(key)] = f"fetched-{key}"
+        return True
+
+
+@pytest.mark.asyncio
+async def test_get_gvar_prefetches_literal(tmp_path):
+    from avrae_ls.config import AvraeLSConfig
+
+    cfg = AvraeLSConfig.default(tmp_path)
+    resolver = _EnsuringResolver(cfg)
+    ctx = _ctx()
+    executor = MockExecutor()
+
+    result = await executor.run("get_gvar('abc123')", ctx, resolver)
+    assert result.error is None
+    assert resolver.calls == ["abc123"]
+    assert result.value == "fetched-abc123"
+
+
+@pytest.mark.asyncio
+async def test_uvar_helpers_available(tmp_path):
+    executor = MockExecutor()
+    ctx = ContextData(vars=VarSources(uvars={"foo": "orig"}))
+    resolver = _resolver(tmp_path)
+    code = "\n".join(
+        [
+            "set_uvar_nx('foo', 'new')",
+            "set_uvar_nx('bar', 2)",
+            "set_uvar('baz', 3)",
+            "get_uvars()",
+        ]
+    )
+
+    result = await executor.run(code, ctx, resolver)
+    assert result.error is None
+    uvars = result.value
+    assert uvars["foo"] == "orig"
+    assert uvars["bar"] == 2
+    assert uvars["baz"] == 3
+
+
+@pytest.mark.asyncio
+async def test_set_cvar_binds_runtime_name(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+    result = await executor.run("c = character(); c.set_cvar('pet', 'hawk'); pet", ctx, resolver)
+    assert result.error is None
+    assert result.value == "hawk"
+
+
+@pytest.mark.asyncio
+async def test_reference_helpers_available(tmp_path):
+    executor = MockExecutor()
+    ctx = ContextData(vars=VarSources(cvars={"foo": 1}))
+    resolver = _resolver(tmp_path)
+    code = "\n".join(
+        [
+            "exists('foo')",
+            "get('foo')",
+            "typeof(123)",
+            "ceil(2.1)",
+            "floor(2.9)",
+            "sqrt(9)",
+            "round(2.51, 1)",
+            "randchoice([1,2,3])",
+            "load_json(dump_json({'a': 1}))['a']",
+            "parse_coins('1')",
+            "using(mod='foo')",
+            "mod",
+        ]
+    )
+    result = await executor.run(code, ctx, resolver)
+    assert result.error is None
+    assert isinstance(result.value, str)
+
+
+def test_documented_builtins_present():
+    executor = MockExecutor()
+    ctx = _ctx()
+    names = executor.available_names(ctx)
+    documented = {
+        "abs",
+        "all",
+        "any",
+        "ceil",
+        "enumerate",
+        "float",
+        "floor",
+        "int",
+        "len",
+        "max",
+        "min",
+        "range",
+        "round",
+        "str",
+        "sum",
+        "time",
+        "sqrt",
+    }
+    assert documented.issubset(names)

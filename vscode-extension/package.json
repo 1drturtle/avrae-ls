@@ -1,0 +1,78 @@
+{
+  "name": "avrae-ls-client",
+  "displayName": "Avrae Draconic Alias Language Server",
+  "description": "VS Code client for avrae-ls (draconic alias diagnostics and mock execution).",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/1drturtle/avrae-ls.git"
+  },
+  "author": {
+    "name": "1drturtle"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:avrae",
+    "onCommand:avrae-ls.runAlias",
+    "onCommand:avrae-ls.reloadConfig"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "avrae",
+        "aliases": [
+          "Avrae Alias",
+          "Draconic"
+        ],
+        "extensions": [
+          ".alias",
+          ".drac"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "avrae",
+        "scopeName": "source.avrae",
+        "path": "./syntaxes/avrae.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.draconic": "python"
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "avrae-ls.runAlias",
+        "title": "Avrae: Run Alias (Mock)"
+      },
+      {
+        "command": "avrae-ls.reloadConfig",
+        "title": "Avrae: Reload Workspace Config"
+      },
+      {
+        "command": "avrae-ls.showPreview",
+        "title": "Avrae: Show Alias Preview"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "npm run bundle",
+    "bundle": "npx esbuild ./extension.js --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js",
+    "lint": "echo \"No lint configured\""
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.84.0",
+    "esbuild": "^0.27.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

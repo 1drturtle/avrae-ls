@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+import re
+import shlex
+from dataclasses import dataclass
+from typing import Any, Optional, Tuple
+
+from .parser import DRACONIC_RE
+from .runtime import ExecutionResult, MockExecutor
+from .context import ContextData, GVarResolver
+from .argument_parsing import apply_argument_parsing
+
+
+@dataclass
+class RenderedAlias:
+    command: str
+    stdout: str
+    error: Optional[BaseException]
+    last_value: Any | None = None
+
+
+def _strip_alias_header(text: str) -> str:
+    lines = text.splitlines()
+    if lines and lines[0].lstrip().startswith("!alias"):
+        first = lines[0].lstrip()
+        parts = first.split(maxsplit=2)
+        remainder = parts[2] if len(parts) > 2 else ""
+        body = "\n".join(lines[1:])
+        if remainder:
+            return remainder + ("\n" + body if body else "")
+        return body
+    return text
+
+
+async def render_alias_command(
+    text: str,
+    executor: MockExecutor,
+    ctx_data: ContextData,
+    resolver: GVarResolver,
+    args: list[str] | None = None,
+) -> RenderedAlias:
+    """Replace <drac2> blocks with their evaluated values and return final command."""
+    body = _strip_alias_header(text)
+    body = apply_argument_parsing(body, args)
+    stdout_parts: list[str] = []
+    parts: list[str] = []
+    last_value = None
+    error: BaseException | None = None
+
+    pos = 0
+    for match in DRACONIC_RE.finditer(body):
+        parts.append(body[pos: match.start()])
+        code = match.group(1)
+        result: ExecutionResult = await executor.run(code, ctx_data, resolver)
+        if result.stdout:
+            stdout_parts.append(result.stdout)
+        if result.error:
+            error = result.error
+            break
+        last_value = result.value
+        parts.append("" if result.value is None else str(result.value))
+        pos = match.end()
+
+    if error is None:
+        parts.append(body[pos:])
+
+    final_command = "".join(parts)
+    return RenderedAlias(command=final_command, stdout="".join(stdout_parts), error=error, last_value=last_value)
+
+
+def validate_embed_payload(payload: str) -> Tuple[bool, str | None]:
+    """
+    Light validation for embed previews using Avrae-style flags.
+
+    Accepts strings such as "-title Foo -f \"T|Body\"" and validates arguments.
+    Returns (is_valid, error_message) without attempting to parse JSON objects.
+    """
+    text = payload.strip()
+    if not text:
+        return False, "Embed payload is empty."
+
+    return _validate_embed_flags(text)
+
+
+def _validate_embed_flags(text: str) -> Tuple[bool, str | None]:
+    """Validate embed flags according to Avrae's help text."""
+    if not text:
+        return False, "Embed payload is empty."
+
+    try:
+        tokens = shlex.split(text)
+    except ValueError as exc:  # pragma: no cover - defensive only
+        return False, f"Embed payload could not be parsed: {exc}"
+
+    flag_handlers = {
+        "-title": lambda val: _require_value("-title", val),
+        "-desc": lambda val: _require_value("-desc", val),
+        "-thumb": lambda val: _require_value("-thumb", val),
+        "-image": lambda val: _require_value("-image", val),
+        "-footer": lambda val: _require_value("-footer", val),
+        "-f": _validate_field_arg,
+        "-color": _validate_color_arg,
+        "-t": _validate_timeout_arg,
+    }
+
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        key = tok.lower()
+        if not tok.startswith("-"):
+            i += 1
+            continue
+        if key not in flag_handlers:
+            return False, f"Embed payload contains unknown flag '{tok}'."
+        next_val = tokens[i + 1] if i + 1 < len(tokens) else None
+        ok, err, consumed = flag_handlers[key](next_val)
+        if not ok:
+            return False, err
+        i += consumed + 1
+    return True, None
+
+
+def _require_value(flag: str, value: str | None) -> Tuple[bool, str | None, int]:
+    if value is None or value.startswith("-"):
+        return False, f"Embed flag '{flag}' requires a value.", 0
+    return True, None, 1
+
+
+def _validate_field_arg(value: str | None) -> Tuple[bool, str | None, int]:
+    ok, err, consumed = _require_value("-f", value)
+    if not ok:
+        return ok, err, consumed
+    assert value is not None  # for type checker
+    parts = value.split("|")
+    if len(parts) < 2 or len(parts) > 3:
+        return False, "Embed field must be in the form \"Title|Text[|inline]\".", consumed
+    if not parts[0] or not parts[1]:
+        return False, "Embed field title and text cannot be empty.", consumed
+    if len(parts) == 3 and parts[2].lower() not in ("inline", ""):
+        return False, "Embed field inline value must be 'inline' or omitted.", consumed
+    return True, None, consumed
+
+
+def _validate_color_arg(value: str | None) -> Tuple[bool, str | None, int]:
+    if value is None or value.startswith("-"):
+        # Random color is allowed when omitted
+        return True, None, 0
+    if not re.match(r"^(?:#|0x)?[0-9a-fA-F]{6}$", value):
+        return False, "Embed color must be a 6-hex value (e.g. #ff00ff).", 1
+    return True, None, 1
+
+
+def _validate_timeout_arg(value: str | None) -> Tuple[bool, str | None, int]:
+    ok, err, consumed = _require_value("-t", value)
+    if not ok:
+        return ok, err, consumed
+    assert value is not None  # for type checker
+    try:
+        num = int(value)
+    except ValueError:
+        return False, "Embed timeout (-t) must be an integer.", consumed
+    if num < 0 or num > 600:
+        return False, "Embed timeout (-t) must be between 0 and 600 seconds.", consumed
+    return True, None, consumed
+
+
+def simulate_command(command: str) -> tuple[str | None, str | None, str | None]:
+    """Very small shim to preview common commands."""
+    text = command.strip()
+    if not text:
+        return None, None, None
+    head, *rest = text.split(maxsplit=1)
+    payload = rest[0] if rest else ""
+    lowered = head.lower()
+    if lowered == "echo":
+        return payload, "echo", None
+    if lowered == "embed":
+        valid, error = validate_embed_payload(payload)
+        return payload, "embed", error
+    return None, head, None
