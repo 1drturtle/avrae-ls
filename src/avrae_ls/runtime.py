@@ -20,7 +20,7 @@ from draconic.interpreter import _Break, _Continue, _Return
 
 from .context import ContextData, GVarResolver
 from .config import VarSources
-from .api import AliasContextAPI, CharacterAPI, CombatAPI, SimpleRollResult
+from .api import AliasContextAPI, CharacterAPI, SimpleCombat, SimpleRollResult
 from . import argparser as avrae_argparser
 # Minimal stand-in for Avrae's AliasException
 class AliasException(Exception):
@@ -334,7 +334,7 @@ class MockExecutor:
             raise AliasException(str(reason), pm_user)
 
         ns_ctx = AliasContextAPI(ctx_data.ctx)
-        ns_combat = CombatAPI(ctx_data.combat)
+        ns_combat = SimpleCombat(ctx_data.combat)
         if character_provider:
             character_fn = character_provider
         else:

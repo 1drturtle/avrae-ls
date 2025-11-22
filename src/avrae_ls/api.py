@@ -1464,8 +1464,11 @@ class CharacterAPI(AliasStatBlock):
 
 
 # === Combat API ===
+MAX_COMBAT_METADATA_SIZE = 100000
+
+
 @dataclass
-class SimpleEffectAPI(_DirMixin):
+class SimpleEffect(_DirMixin):
     data: MutableMapping[str, Any]
     ATTRS: ClassVar[list[str]] = [
         "name",
@@ -1528,15 +1531,17 @@ class SimpleEffectAPI(_DirMixin):
         return str(val) if val is not None else None
 
     @property
-    def parent(self) -> SimpleEffectAPI | None:
+    def parent(self) -> "SimpleEffect" | None:
         parent = self.data.get("parent")
-        return SimpleEffectAPI(parent) if parent else None
+        return SimpleEffect(parent) if parent else None
 
     @property
-    def children(self) -> list[SimpleEffectAPI]:
-        return [SimpleEffectAPI(c) for c in self.data.get("children", [])]
+    def children(self) -> list["SimpleEffect"]:
+        return [SimpleEffect(c) for c in self.data.get("children", [])]
 
-    def set_parent(self, parent: "SimpleEffectAPI") -> None:
+    def set_parent(self, parent: "SimpleEffect") -> None:
+        if not isinstance(parent, SimpleEffect):
+            raise TypeError("Parent effect must be a SimpleEffect.")
         self.data["parent"] = parent.data
 
     def __getitem__(self, item: str) -> Any:
@@ -1544,7 +1549,7 @@ class SimpleEffectAPI(_DirMixin):
 
 
 @dataclass
-class CombatantAPI(AliasStatBlock):
+class SimpleCombatant(AliasStatBlock):
     ATTRS: ClassVar[list[str]] = AliasStatBlock.ATTRS + [
         "effects",
         "init",
@@ -1556,6 +1561,7 @@ class CombatantAPI(AliasStatBlock):
         "race",
         "monster_name",
         "is_hidden",
+        "id",
     ]
     METHODS: ClassVar[list[str]] = AliasStatBlock.METHODS + [
         "save",
@@ -1576,8 +1582,13 @@ class CombatantAPI(AliasStatBlock):
         self.data.setdefault("type", "combatant")
 
     @property
-    def effects(self) -> list[SimpleEffectAPI]:
-        return [SimpleEffectAPI(e) for e in self.data.get("effects", [])]
+    def id(self) -> str | None:
+        val = self.data.get("id")
+        return str(val) if val is not None else None
+
+    @property
+    def effects(self) -> list[SimpleEffect]:
+        return [SimpleEffect(e) for e in self.data.get("effects", [])]
 
     @property
     def init(self) -> int:
@@ -1620,12 +1631,38 @@ class CombatantAPI(AliasStatBlock):
     def is_hidden(self) -> bool:
         return bool(self.data.get("is_hidden", False))
 
-    def save(self, ability: str, adv: bool | None = None) -> dict[str, Any]:
-        roll = self.saves.get(ability)
-        return {"roll": roll.d20(base_adv=adv), "mod": roll.value}
+    def save(self, ability: str, adv: bool | None = None) -> SimpleRollResult:
+        roll_expr = self.saves.get(ability).d20(base_adv=adv)
+        try:
+            roll_result = d20.roll(roll_expr)
+        except Exception:
+            roll_result = d20.roll("0")
+        return SimpleRollResult(roll_result)
 
-    def damage(self, dice_str: str, crit: bool = False, d=None, c=None, critdice: int = 0, overheal: bool = False) -> dict[str, Any]:
-        return {"damage": f"{dice_str}{' (CRIT)' if crit else ''}", "total": dice_str, "roll": {"crit": crit}}
+    def damage(
+        self,
+        dice_str: str,
+        crit: bool = False,
+        d=None,
+        c=None,
+        critdice: int = 0,
+        overheal: bool = False,
+    ) -> dict[str, Any]:
+        expr = str(dice_str)
+        if crit:
+            expr = f"({expr})*2"
+        if d is not None:
+            expr = f"({expr})+({d})"
+        if c is not None and crit:
+            expr = f"({expr})+({c})"
+        if critdice:
+            expr = f"({expr})+{int(critdice)}"
+        try:
+            roll_result = d20.roll(expr)
+        except Exception:
+            roll_result = d20.roll("0")
+        label = "Damage (CRIT!)" if crit else "Damage"
+        return {"damage": f"**{label}**: {roll_result}", "total": roll_result.total, "roll": SimpleRollResult(roll_result)}
 
     def set_ac(self, ac: int) -> None:
         self.data["ac"] = int(ac)
@@ -1644,9 +1681,9 @@ class CombatantAPI(AliasStatBlock):
         return self.group
 
     def set_note(self, note: str) -> None:
-        self.data["note"] = str(note)
+        self.data["note"] = str(note) if note is not None else None
 
-    def get_effect(self, name: str, strict: bool = False) -> SimpleEffectAPI | None:
+    def get_effect(self, name: str, strict: bool = False) -> SimpleEffect | None:
         name_lower = str(name).lower()
         for effect in self.effects:
             if strict and effect.name.lower() == name_lower:
@@ -1655,26 +1692,74 @@ class CombatantAPI(AliasStatBlock):
                 return effect
         return None
 
-    def add_effect(self, name: str, duration: int | None = None, **kwargs: Any) -> SimpleEffectAPI:
-        payload = {"name": str(name), "duration": duration, **kwargs}
-        self.data.setdefault("effects", []).append(payload)
-        return SimpleEffectAPI(payload)
+    def add_effect(
+        self,
+        name: str,
+        args: str | None = None,
+        duration: int | None = None,
+        concentration: bool = False,
+        parent: SimpleEffect | None = None,
+        end: bool = False,
+        desc: str | None = None,
+        passive_effects: dict | None = None,
+        attacks: list[dict] | None = None,
+        buttons: list[dict] | None = None,
+        tick_on_combatant_id: str | None = None,
+    ) -> SimpleEffect:
+        duration_val = int(duration) if duration is not None else None
+        desc_val = str(desc) if desc is not None else None
+        payload: dict[str, Any] = {
+            "name": str(name),
+            "duration": duration_val,
+            "remaining": duration_val,
+            "args": str(args) if args is not None else None,
+            "desc": desc_val,
+            "concentration": bool(concentration),
+            "conc": bool(concentration),
+            "ticks_on_end": end,
+            "effect": dict(passive_effects or {}),
+            "attacks": list(attacks or []),
+            "buttons": list(buttons or []),
+            "combatant_name": self.name,
+        }
+        if tick_on_combatant_id is not None:
+            payload["tick_on_combatant_id"] = str(tick_on_combatant_id)
+        if parent is not None:
+            if not isinstance(parent, SimpleEffect):
+                raise TypeError("Parent effect must be a SimpleEffect.")
+            payload["parent"] = parent.data
+        effects = self.data.setdefault("effects", [])
+        existing = self.get_effect(name, strict=True)
+        if existing:
+            try:
+                effects.remove(existing.data)
+            except ValueError:
+                pass
+        effects.append(payload)
+        return SimpleEffect(payload)
 
     def remove_effect(self, name: str, strict: bool = False) -> None:
         effect = self.get_effect(name, strict)
         if effect:
-            self.data["effects"].remove(effect.data)
+            try:
+                self.data.setdefault("effects", []).remove(effect.data)
+            except ValueError:
+                pass
 
 
 @dataclass
-class SimpleGroupAPI(_DirMixin):
+class SimpleGroup(_DirMixin):
     data: MutableMapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["combatants", "type", "init", "name", "id"]
     METHODS: ClassVar[list[str]] = ["get_combatant", "set_init"]
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.data.setdefault("type", "group")
+
     @property
-    def combatants(self) -> list[CombatantAPI]:
-        return [CombatantAPI(c) for c in self.data.get("combatants", [])]
+    def combatants(self) -> list[SimpleCombatant]:
+        return [SimpleCombatant(c) for c in self.data.get("combatants", [])]
 
     @property
     def type(self) -> str:
@@ -1693,7 +1778,7 @@ class SimpleGroupAPI(_DirMixin):
         val = self.data.get("id")
         return str(val) if val is not None else None
 
-    def get_combatant(self, name: str, strict: bool | None = None) -> CombatantAPI | None:
+    def get_combatant(self, name: str, strict: bool | None = None) -> SimpleCombatant | None:
         name_lower = str(name).lower()
         for combatant in self.combatants:
             if strict is True and combatant.name.lower() == name_lower:
@@ -1716,32 +1801,32 @@ class SimpleGroupAPI(_DirMixin):
 
 
 @dataclass
-class CombatAPI(_DirMixin):
+class SimpleCombat(_DirMixin):
     data: MutableMapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["combatants", "groups", "me", "current", "name", "round_num", "turn_num", "metadata"]
     METHODS: ClassVar[list[str]] = ["get_combatant", "get_group", "set_metadata", "get_metadata", "delete_metadata", "set_round", "end_round"]
 
     @property
-    def combatants(self) -> list[CombatantAPI]:
-        return [CombatantAPI(c) for c in self.data.get("combatants", [])]
+    def combatants(self) -> list[SimpleCombatant]:
+        return [SimpleCombatant(c) for c in self.data.get("combatants", [])]
 
     @property
-    def groups(self) -> list[SimpleGroupAPI]:
-        return [SimpleGroupAPI(g) for g in self.data.get("groups", [])]
+    def groups(self) -> list[SimpleGroup]:
+        return [SimpleGroup(g) for g in self.data.get("groups", [])]
 
     @property
-    def me(self) -> CombatantAPI | None:
+    def me(self) -> SimpleCombatant | None:
         me_data = self.data.get("me")
-        return CombatantAPI(me_data) if me_data is not None else None
+        return SimpleCombatant(me_data) if me_data is not None else None
 
     @property
-    def current(self) -> CombatantAPI | SimpleGroupAPI | None:
+    def current(self) -> SimpleCombatant | SimpleGroup | None:
         cur = self.data.get("current")
         if cur is None:
             return None
         if cur.get("type") == "group":
-            return SimpleGroupAPI(cur)
-        return CombatantAPI(cur)
+            return SimpleGroup(cur)
+        return SimpleCombatant(cur)
 
     @property
     def name(self) -> str | None:
@@ -1760,7 +1845,7 @@ class CombatAPI(_DirMixin):
     def metadata(self) -> MutableMapping[str, Any]:
         return self.data.setdefault("metadata", {})
 
-    def get_combatant(self, name: str, strict: bool | None = None) -> CombatantAPI | None:
+    def get_combatant(self, name: str, strict: bool | None = None) -> SimpleCombatant | None:
         name_lower = str(name).lower()
         for combatant in self.combatants:
             if strict is True and combatant.name.lower() == name_lower:
@@ -1775,7 +1860,7 @@ class CombatAPI(_DirMixin):
                     return combatant
         return None
 
-    def get_group(self, name: str, strict: bool | None = None) -> SimpleGroupAPI | None:
+    def get_group(self, name: str, strict: bool | None = None) -> SimpleGroup | None:
         name_lower = str(name).lower()
         for group in self.groups:
             if strict is True and group.name.lower() == name_lower:
@@ -1791,7 +1876,13 @@ class CombatAPI(_DirMixin):
         return None
 
     def set_metadata(self, k: str, v: str) -> None:
-        self.metadata[str(k)] = str(v)
+        key = str(k)
+        value = str(v)
+        existing = {str(ke): str(va) for ke, va in self.metadata.items() if str(ke) != key}
+        proposed_size = sum(len(ke) + len(va) for ke, va in existing.items()) + len(key) + len(value)
+        if proposed_size > MAX_COMBAT_METADATA_SIZE:
+            raise ValueError("Combat metadata is too large")
+        self.metadata[key] = value
 
     def get_metadata(self, k: str, default: Any = None) -> Any:
         return self.metadata.get(str(k), default)
@@ -1811,3 +1902,10 @@ class CombatAPI(_DirMixin):
 
     def __getitem__(self, item: str) -> Any:
         return getattr(self, str(item))
+
+
+# Backwards-compatible aliases for existing consumers
+CombatantAPI = SimpleCombatant
+SimpleEffectAPI = SimpleEffect
+SimpleGroupAPI = SimpleGroup
+CombatAPI = SimpleCombat

@@ -28,20 +28,21 @@ from .api import (
     CategoryAPI,
     ChannelAPI,
     CharacterAPI,
-    CombatAPI,
-    CombatantAPI,
+    SimpleCombat,
+    SimpleCombatant,
     GuildAPI,
     RoleAPI,
     AuthorAPI,
-    SimpleEffectAPI,
-    SimpleGroupAPI,
+    SimpleEffect,
+    SimpleGroup,
     SimpleRollResult,
 )
 from .signature_help import FunctionSig
 
 TYPE_MAP: Dict[str, object] = {
     "character": CharacterAPI,
-    "combat": CombatAPI,
+    "combat": SimpleCombat,
+    "SimpleCombat": SimpleCombat,
     "ctx": AliasContextAPI,
     "SimpleRollResult": SimpleRollResult,
     "stats": AliasBaseStats,
@@ -64,9 +65,12 @@ TYPE_MAP: Dict[str, object] = {
     "category": CategoryAPI,
     "author": AuthorAPI,
     "role": RoleAPI,
-    "combatant": CombatantAPI,
-    "group": SimpleGroupAPI,
-    "effect": SimpleEffectAPI,
+    "combatant": SimpleCombatant,
+    "SimpleCombatant": SimpleCombatant,
+    "group": SimpleGroup,
+    "SimpleGroup": SimpleGroup,
+    "effect": SimpleEffect,
+    "SimpleEffect": SimpleEffect,
 }
 
 
@@ -474,7 +478,7 @@ def _eval_node(node: ast.AST, ctx_data: ContextData, bindings: Dict[str, Any]) -
             if node.func.id == "character":
                 return CharacterAPI(ctx_data.character)
             if node.func.id == "combat":
-                return CombatAPI(ctx_data.combat)
+                return SimpleCombat(ctx_data.combat)
             if node.func.id == "range":
                 args = []
                 for arg in node.args:
