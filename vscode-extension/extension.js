@@ -9,7 +9,7 @@ let lastPreviewDocument = undefined;
 
 function activate(context) {
   const serverCommand = "uv";
-  const serverArgs = ["run", "avrae-ls"];
+  const serverArgs = ["tool", "run", "avrae-ls"];
 
   // Ensure the server runs from the repo root even if the extension host is launched elsewhere.
 

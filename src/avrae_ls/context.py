@@ -34,7 +34,7 @@ class ContextBuilder:
     def build(self, profile_name: str | None = None) -> ContextData:
         profile = self._select_profile(profile_name)
         merged_vars = self._merge_character_cvars(profile.character, self._load_var_files().merge(profile.vars))
-        self._gvar_resolver.reset(merged_vars.gvars)
+        self._gvar_resolver.seed(merged_vars.gvars)
         return ContextData(
             ctx=dict(profile.ctx),
             combat=dict(profile.combat),
@@ -79,6 +79,13 @@ class GVarResolver:
         self._cache = {}
         if gvars:
             self._cache.update({str(k): v for k, v in gvars.items()})
+
+    def seed(self, gvars: Dict[str, Any] | None = None) -> None:
+        """Merge provided gvars into the cache without dropping fetched values."""
+        if not gvars:
+            return
+        for k, v in gvars.items():
+            self._cache[str(k)] = v
 
     def get_local(self, key: str) -> Any:
         return self._cache.get(str(key))

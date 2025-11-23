@@ -28,6 +28,14 @@ class AliasException(Exception):
         super().__init__(msg)
         self.pm_user = pm_user
 
+
+try:
+    from avrae.aliasing.errors import FunctionRequiresCharacter  # type: ignore
+except Exception:  # pragma: no cover - fallback when avrae is unavailable
+    class FunctionRequiresCharacter(Exception):
+        def __init__(self, msg: str | None = None):
+            super().__init__(msg or "This alias requires an active character.")
+
 log = logging.getLogger(__name__)
 
 
@@ -204,8 +212,12 @@ class MockExecutor:
         def _character_provider() -> CharacterAPI:
             nonlocal runtime_character
             interp = interpreter_ref["interpreter"]
+            if not ctx_data.character:
+                raise FunctionRequiresCharacter()
             if runtime_character is None and interp is not None:
                 runtime_character = _RuntimeCharacter(ctx_data.character, ctx_data.vars, interp)
+            if runtime_character is None:
+                runtime_character = CharacterAPI(ctx_data.character)
             return runtime_character  # type: ignore[return-value]
 
         builtins = self._build_builtins(
@@ -334,13 +346,15 @@ class MockExecutor:
             raise AliasException(str(reason), pm_user)
 
         ns_ctx = AliasContextAPI(ctx_data.ctx)
-        ns_combat = SimpleCombat(ctx_data.combat)
+        ns_combat = SimpleCombat(ctx_data.combat) if ctx_data.combat else None
         if character_provider:
             character_fn = character_provider
         else:
-            ns_character = CharacterAPI(ctx_data.character)
+            ns_character = CharacterAPI(ctx_data.character) if ctx_data.character else None
 
             def character_fn():
+                if ns_character is None:
+                    raise FunctionRequiresCharacter()
                 return ns_character
 
         builtins.update(

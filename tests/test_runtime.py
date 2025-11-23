@@ -2,11 +2,15 @@ import pytest
 
 from avrae_ls.config import VarSources
 from avrae_ls.context import ContextData, GVarResolver
-from avrae_ls.runtime import MockExecutor
+from avrae_ls.runtime import FunctionRequiresCharacter, MockExecutor
 
 
 def _ctx():
     return ContextData(vars=VarSources())
+
+
+def _ctx_with_character(data: dict | None = None):
+    return ContextData(character=data or {"name": "Aelar"}, vars=VarSources())
 
 
 def _resolver(tmp_path):
@@ -16,6 +20,17 @@ def _resolver(tmp_path):
     res = GVarResolver(cfg)
     res.reset({"foo": "bar"})
     return res
+
+
+@pytest.mark.asyncio
+async def test_character_requires_active_character(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run("character()", ctx, resolver)
+    assert result.error is not None
+    assert isinstance(getattr(result.error, "__cause__", None), FunctionRequiresCharacter)
 
 
 @pytest.mark.asyncio
@@ -173,6 +188,17 @@ async def test_character_attributes_accessible(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_combat_returns_none_when_missing(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run("combat()", ctx, resolver)
+    assert result.error is None
+    assert result.value is None
+
+
+@pytest.mark.asyncio
 async def test_combat_combatants_executes(tmp_path):
     from avrae_ls.config import AvraeLSConfig
     from avrae_ls.context import ContextBuilder
@@ -241,7 +267,7 @@ async def test_uvar_helpers_available(tmp_path):
 @pytest.mark.asyncio
 async def test_set_cvar_binds_runtime_name(tmp_path):
     executor = MockExecutor()
-    ctx = _ctx()
+    ctx = _ctx_with_character()
     resolver = _resolver(tmp_path)
     result = await executor.run("c = character(); c.set_cvar('pet', 'hawk'); pet", ctx, resolver)
     assert result.error is None

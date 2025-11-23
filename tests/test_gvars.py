@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 
 from avrae_ls.config import AvraeLSConfig
-from avrae_ls.context import GVarResolver
+from avrae_ls.context import ContextBuilder, GVarResolver
 from avrae_ls.server import AvraeLanguageServer, refresh_gvars
 
 
@@ -29,3 +29,15 @@ async def test_refresh_gvars_command_uses_profile_seed():
     assert "gvars" in result
     assert result["count"] == len(result["gvars"])
     assert "abc123" not in result["gvars"]
+
+
+def test_context_builder_preserves_cached_gvars(tmp_path):
+    cfg = AvraeLSConfig.default(tmp_path)
+    builder = ContextBuilder(cfg)
+    resolver = builder.gvar_resolver
+
+    resolver.seed({"cached": "value"})
+    builder.build()
+    builder.build("default")
+
+    assert resolver.get_local("cached") == "value"

@@ -49,6 +49,31 @@ async def test_reports_unknown_gvar(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_fetches_gvar_when_enabled(tmp_path):
+    cfg = AvraeLSConfig.default(tmp_path)
+    cfg.enable_gvar_fetch = True
+
+    class _RecordingResolver(GVarResolver):
+        def __init__(self, cfg):
+            super().__init__(cfg)
+            self.calls: list[str] = []
+
+        async def ensure(self, key: str) -> bool:
+            self.calls.append(str(key))
+            self._cache[str(key)] = f"fetched-{key}"
+            return True
+
+    provider = _provider()
+    resolver = _RecordingResolver(cfg)
+    ctx_data = ContextData(vars=VarSources())
+
+    diags = await provider.analyze("get_gvar('abc123')", ctx_data, resolver)
+    assert not any("gvar" in d.message for d in diags)
+    assert resolver.calls == ["abc123"]
+    assert resolver.get_local("abc123") == "fetched-abc123"
+
+
+@pytest.mark.asyncio
 async def test_for_loop_binds_target(tmp_path):
     provider = _provider()
     resolver = _resolver(tmp_path)
