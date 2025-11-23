@@ -271,6 +271,55 @@ async def test_using_prefetches_literal(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_using_missing_gvar_errors(tmp_path):
+    from avrae_ls.config import AvraeLSConfig
+
+    cfg = AvraeLSConfig.default(tmp_path)
+    resolver = GVarResolver(cfg)
+    ctx = _ctx()
+    executor = MockExecutor()
+
+    result = await executor.run("using(mod='missing')", ctx, resolver)
+    assert result.error is not None
+    assert "No gvar named 'missing'" in str(result.error)
+
+
+@pytest.mark.asyncio
+async def test_using_detects_circular_imports(tmp_path):
+    from avrae_ls.config import AvraeLSConfig
+
+    cfg = AvraeLSConfig.default(tmp_path)
+    resolver = GVarResolver(cfg)
+    resolver.seed(
+        {
+            "mod_a": "using(b='mod_b')",
+            "mod_b": "using(a='mod_a')",
+        }
+    )
+    ctx = _ctx()
+    executor = MockExecutor()
+
+    result = await executor.run("using(a='mod_a')", ctx, resolver)
+    assert result.error is not None
+    assert "Circular import" in str(result.error)
+
+
+@pytest.mark.asyncio
+async def test_using_rejects_builtin_shadow(tmp_path):
+    from avrae_ls.config import AvraeLSConfig
+
+    cfg = AvraeLSConfig.default(tmp_path)
+    resolver = GVarResolver(cfg)
+    resolver.seed({"mod": "answer = 1"})
+    ctx = _ctx()
+    executor = MockExecutor()
+
+    result = await executor.run("using(len='mod')", ctx, resolver)
+    assert result.error is not None
+    assert "builtin" in str(result.error)
+
+
+@pytest.mark.asyncio
 async def test_uvar_helpers_available(tmp_path):
     executor = MockExecutor()
     ctx = ContextData(vars=VarSources(uvars={"foo": "orig"}))

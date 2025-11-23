@@ -22,12 +22,17 @@ def find_draconic_blocks(source: str) -> List[DraconicBlock]:
         raw = match.group(1)
         prefix = source[: match.start()]
         line_offset = prefix.count("\n")
-        line_count = raw.count("\n") + 1 if raw else 1
+        # Column where draconic content starts on its first line
+        last_nl = prefix.rfind("\n")
+        start_col = match.start(1) - (last_nl + 1 if last_nl != -1 else 0)
+        char_offset = start_col
         # Trim leading blank lines inside the block while tracking the line shift
         while raw.startswith("\n"):
             raw = raw[1:]
             line_offset += 1
-        blocks.append(DraconicBlock(code=raw, line_offset=line_offset, char_offset=0, line_count=line_count))
+            char_offset = 0
+        line_count = raw.count("\n") + 1 if raw else 1
+        blocks.append(DraconicBlock(code=raw, line_offset=line_offset, char_offset=char_offset, line_count=line_count))
     return blocks
 
 

@@ -33,11 +33,12 @@ class ContextBuilder:
 
     def build(self, profile_name: str | None = None) -> ContextData:
         profile = self._select_profile(profile_name)
+        combat = self._ensure_me_combatant(profile)
         merged_vars = self._merge_character_cvars(profile.character, self._load_var_files().merge(profile.vars))
         self._gvar_resolver.seed(merged_vars.gvars)
         return ContextData(
             ctx=dict(profile.ctx),
-            combat=dict(profile.combat),
+            combat=combat,
             character=dict(profile.character),
             vars=merged_vars,
         )
@@ -68,6 +69,66 @@ class ContextBuilder:
         if builtin_cvars:
             merged = merged.merge(VarSources(cvars=builtin_cvars))
         return merged
+
+    def _ensure_me_combatant(self, profile: ContextProfile) -> Dict[str, Any]:
+        combat = dict(profile.combat or {})
+        combatants = list(combat.get("combatants") or [])
+        me = combat.get("me")
+        author_id = (profile.ctx.get("author") or {}).get("id")
+
+        def _matches_author(combatant: Dict[str, Any]) -> bool:
+            try:
+                return author_id is not None and str(combatant.get("controller")) == str(author_id)
+            except Exception:
+                return False
+
+        # Use an existing combatant controlled by the author if me is missing.
+        if me is None:
+            for existing in combatants:
+                if _matches_author(existing):
+                    me = existing
+                    break
+
+        # If still missing, synthesize a combatant from the character sheet.
+        if me is None and profile.character:
+            me = {
+                "name": profile.character.get("name", "Player"),
+                "id": "cmb_player",
+                "controller": author_id,
+                "group": None,
+                "race": profile.character.get("race"),
+                "monster_name": None,
+                "is_hidden": False,
+                "init": profile.character.get("stats", {}).get("dexterity", 10),
+                "initmod": 0,
+                "type": "combatant",
+                "note": "Mock combatant for preview",
+                "effects": [],
+                "stats": profile.character.get("stats") or {},
+                "levels": profile.character.get("levels") or profile.character.get("class_levels") or {},
+                "skills": profile.character.get("skills") or {},
+                "saves": profile.character.get("saves") or {},
+                "resistances": profile.character.get("resistances") or {},
+                "spellbook": profile.character.get("spellbook") or {},
+                "attacks": profile.character.get("attacks") or [],
+                "max_hp": profile.character.get("max_hp"),
+                "hp": profile.character.get("hp"),
+                "temp_hp": profile.character.get("temp_hp"),
+                "ac": profile.character.get("ac"),
+                "creature_type": profile.character.get("creature_type"),
+            }
+
+        if me is not None:
+            combat["me"] = me
+            if not any(c is me for c in combatants) and not any(_matches_author(c) for c in combatants):
+                combatants.insert(0, me)
+            combat["combatants"] = combatants
+            if "current" not in combat or combat.get("current") is None:
+                combat["current"] = me
+        else:
+            combat["combatants"] = combatants
+
+        return combat
 
 
 class GVarResolver:

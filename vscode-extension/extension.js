@@ -6,6 +6,7 @@ let client;
 let previewPanel;
 let previewArgsState = "";
 let lastPreviewDocument = undefined;
+let dracPreviewDecoration;
 
 function activate(context) {
   const serverCommand = "avrae-ls";
@@ -132,9 +133,11 @@ function activate(context) {
         result: "",
         error: `Failed to run alias: ${err}`,
       });
+      updateInlineDecorations(document, {});
       return;
     }
     renderPreview(result || {});
+    updateInlineDecorations(document, result || {});
   }
 
   function ensurePreviewPanel(ctx) {
@@ -156,6 +159,15 @@ function activate(context) {
         previewArgsState = message.args || "";
         await runAndRenderLastPreview();
       }
+      if (message.command === "revealLine" && lastPreviewDocument) {
+        const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === lastPreviewDocument.uri.toString());
+        if (editor) {
+          const line = Math.max(0, Number(message.line || 0));
+          const pos = new vscode.Position(line, 0);
+          editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+          editor.selection = new vscode.Selection(pos, pos);
+        }
+      }
     });
     renderPreview({});
   }
@@ -163,24 +175,28 @@ function activate(context) {
   function renderPreview(result) {
     if (!previewPanel) return;
     const { stdout = "", result: value, error, validationError } = result;
-    const validation = validationError
-      ? `<pre class="warning">Embed preview warning: ${escapeHtml(validationError)}</pre>`
-      : "";
-    const renderedResult =
-      value === undefined ? "" : `<pre class="result">${escapeHtml(JSON.stringify(value, null, 2))}</pre>`;
-    const renderedStdout = stdout ? `<pre class="stdout">${escapeHtml(stdout)}</pre>` : "";
-    const renderedError = error ? `<pre class="error">${escapeHtml(error)}</pre>` : "";
+    const renderedResult = value === undefined
+      ? `<div class="empty">No result</div>`
+      : `<pre class="result code-block">${escapeHtml(JSON.stringify(value, null, 2))}</pre>`;
+    const renderedStdout = stdout
+      ? `<pre class="stdout code-block">${escapeHtml(stdout)}</pre>`
+      : `<div class="empty">No stdout</div>`;
+    const diagnostics = [
+      validationError ? `Embed preview warning: ${validationError}` : null,
+      error ? `Runtime error: ${error}` : null,
+    ].filter(Boolean);
+    const renderedDiagnostics = diagnostics.length
+      ? diagnostics.map((d, idx) => `<pre class="diagnostic code-block" data-line="${idx === 0 ? 0 : ""}">${escapeHtml(d)}</pre>`).join("")
+      : `<div class="empty">No diagnostics</div>`;
     const renderedCommand = result.command
-      ? `<div class="command"><strong>Command:</strong><pre class="block">${escapeHtml(result.command)}</pre></div>`
-      : "";
+      ? `<pre class="code-block">${escapeHtml(result.command)}</pre>`
+      : `<div class="empty">No command captured</div>`;
     const canPreview =
       result.result && (result.commandName === "echo" || result.commandName === "embed");
     const previewLabel = result.commandName === "embed" ? "Embed" : "Preview";
     const renderedPreview = canPreview
-      ? `<div class="preview"><strong>${previewLabel}:</strong><pre class="block">${escapeHtml(
-        String(result.result)
-      )}</pre></div>`
-      : "";
+      ? `<pre class="code-block">${escapeHtml(String(result.result))}</pre>`
+      : `<div class="empty">Nothing to preview</div>`;
 
     previewPanel.webview.html = `<!DOCTYPE html>
 <html>
@@ -190,15 +206,22 @@ body { font-family: var(--vscode-editor-font-family, monospace); padding: 12px; 
 pre { white-space: pre-wrap; word-break: break-word; }
 .stdout { color: var(--vscode-editor-foreground); }
 .result { color: var(--vscode-charts-green); }
+.diagnostic { color: var(--vscode-errorForeground); }
 .error { color: var(--vscode-errorForeground); }
 .warning { color: var(--vscode-charts-yellow); }
 .command { margin: 8px 0; font-weight: 600; }
 .preview { margin: 8px 0; }
-.block { white-space: pre-wrap; margin: 4px 0 0 0; }
+.code-block { background: var(--vscode-editor-background); padding: 8px; border-radius: 4px; border: 1px solid var(--vscode-editorWidget-border); }
 .controls { margin: 0 0 12px 0; }
 .controls label { display: block; margin-bottom: 4px; }
 .controls input { width: 100%; box-sizing: border-box; padding: 6px; }
 .controls button { margin-top: 6px; }
+.tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+.tab-btn { padding: 6px 10px; border: 1px solid var(--vscode-editorWidget-border); background: var(--vscode-editorWidget-background); color: var(--vscode-editor-foreground); border-radius: 4px; cursor: pointer; }
+.tab-btn.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+.empty { color: var(--vscode-descriptionForeground); padding: 6px 0; }
 </style>
 </head>
 <body>
@@ -208,12 +231,18 @@ pre { white-space: pre-wrap; word-break: break-word; }
     <input id="argsInput" type="text" value="${escapeHtml(previewArgsState)}" />
     <button id="runBtn">Run Preview</button>
   </div>
-  ${renderedCommand || ""}
-  ${renderedPreview || ""}
-  ${validation || ""}
-  ${renderedError || ""}
-  ${renderedStdout || ""}
-  ${renderedResult || ""}
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="preview">Preview</button>
+    <button class="tab-btn" data-tab="result">Result</button>
+    <button class="tab-btn" data-tab="stdout">Stdout</button>
+    <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
+    <button class="tab-btn" data-tab="command">Command</button>
+  </div>
+  <div id="preview" class="tab-panel active">${renderedPreview}</div>
+  <div id="result" class="tab-panel">${renderedResult}</div>
+  <div id="stdout" class="tab-panel">${renderedStdout}</div>
+  <div id="diagnostics" class="tab-panel">${renderedDiagnostics}</div>
+  <div id="command" class="tab-panel">${renderedCommand}</div>
   <script>
     const vscode = acquireVsCodeApi();
     const input = document.getElementById('argsInput');
@@ -225,6 +254,23 @@ pre { white-space: pre-wrap; word-break: break-word; }
       if (e.key === 'Enter') {
         vscode.postMessage({ command: 'setArgs', args: input.value || '' });
       }
+    });
+    const tabs = document.querySelectorAll('.tab-btn');
+    const panels = document.querySelectorAll('.tab-panel');
+    tabs.forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabs.forEach(b => b.classList.remove('active'));
+        panels.forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        const panel = document.getElementById(btn.dataset.tab);
+        if (panel) panel.classList.add('active');
+      });
+    });
+    document.querySelectorAll('.diagnostic').forEach(el => {
+      el.addEventListener('click', () => {
+        const line = Number(el.dataset.line || 0);
+        vscode.postMessage({ command: 'revealLine', line });
+      });
     });
   </script>
 </body>
@@ -273,6 +319,75 @@ pre { white-space: pre-wrap; word-break: break-word; }
     }
     if (current) result.push(current);
     return result;
+  }
+
+  function updateInlineDecorations(document, result) {
+    if (!document) return;
+    const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === document.uri.toString());
+    if (!editor) return;
+    if (!dracPreviewDecoration) {
+      dracPreviewDecoration = vscode.window.createTextEditorDecorationType({
+        isWholeLine: true,
+        after: {
+          margin: "0 0 0 12px",
+        },
+      });
+      context.subscriptions.push(dracPreviewDecoration);
+    }
+    const summary = summarizeResult(result);
+    if (!summary) {
+      editor.setDecorations(dracPreviewDecoration, []);
+      return;
+    }
+    const hover = new vscode.MarkdownString(`[View details](command:avrae-ls.showPreview)`);
+    hover.isTrusted = true;
+    const color = result.error ? "var(--vscode-errorForeground)" : "var(--vscode-charts-green)";
+    const ranges = [];
+    const text = document.getText();
+    const regex = /<drac2>([\s\S]*?)<\/drac2>/gi;
+    let match;
+    while ((match = regex.exec(text))) {
+      const start = document.positionAt(match.index);
+      const range = new vscode.Range(start, start);
+      ranges.push({
+        range,
+        hoverMessage: hover,
+        renderOptions: {
+          after: {
+            contentText: " " + summary,
+            color,
+          },
+        },
+      });
+    }
+    editor.setDecorations(dracPreviewDecoration, ranges);
+  }
+
+  function summarizeResult(result) {
+    if (!result || typeof result !== "object") return "";
+    const err = result.error;
+    if (err) {
+      return truncate(`Error: ${String(err)}`);
+    }
+    if (result.stdout) {
+      const firstLine = String(result.stdout).split(/\\r?\\n/)[0];
+      if (firstLine) {
+        return truncate(`stdout: ${firstLine}`);
+      }
+    }
+    if (result.result !== undefined) {
+      try {
+        return truncate(`result: ${JSON.stringify(result.result)}`);
+      } catch {
+        return truncate(`result: ${String(result.result)}`);
+      }
+    }
+    return "Ran successfully";
+  }
+
+  function truncate(text, max = 80) {
+    if (text.length <= max) return text;
+    return text.slice(0, max - 1) + "…";
   }
 }
 

@@ -118,6 +118,35 @@ async def test_handles_alias_drac_block(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_drac_block_diagnostics_offset_respects_prefix_lines(tmp_path):
+    provider = _provider()
+    resolver = _resolver(tmp_path)
+    ctx_data = ContextData(vars=VarSources())
+
+    alias_text = "# comment before\n!alias oops echo\n<drac2>\nfoo = 1\nbar\n</drac2>\n# after"
+    diags = await provider.analyze(alias_text, ctx_data, resolver)
+    assert diags
+    diag = diags[0]
+    # 'bar' is on line 4 (0-based index)
+    assert diag.range.start.line == 4
+
+
+@pytest.mark.asyncio
+async def test_drac_block_diagnostics_offset_respects_inline_char(tmp_path):
+    provider = _provider()
+    resolver = _resolver(tmp_path)
+    ctx_data = ContextData(vars=VarSources())
+
+    alias_text = "!alias inline echo prefix <drac2>bad_var</drac2> suffix"
+    diags = await provider.analyze(alias_text, ctx_data, resolver)
+    assert diags
+    diag = diags[0]
+    # bad_var starts after the prefix and opening tag
+    assert diag.range.start.line == 0
+    assert diag.range.start.character > alias_text.index("<drac2>")
+
+
+@pytest.mark.asyncio
 async def test_reports_bad_args(tmp_path):
     provider = _provider()
     resolver = _resolver(tmp_path)
