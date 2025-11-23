@@ -149,6 +149,13 @@ class DiagnosticProvider:
                         )
                     )
 
+            def visit_Call(self, node: ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id == "using":
+                    for kw in node.keywords:
+                        if kw.arg:
+                            self.tracker.add(str(kw.arg))
+                self.generic_visit(node)
+
         walker = Walker(known)
         for stmt in body:
             walker.visit(stmt)
@@ -200,24 +207,41 @@ async def _check_gvars(
     settings: DiagnosticSettings,
 ) -> List[types.Diagnostic]:
     diagnostics: list[types.Diagnostic] = []
+    seen: set[str] = set()
+
+    def _literal_value(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Str):
+            return node.s
+        return None
+
     for node in _iter_calls(body):
-        if not isinstance(node.func, ast.Name) or node.func.id != "get_gvar":
+        if not isinstance(node.func, ast.Name):
             continue
-        if not node.args:
-            continue
-        arg = node.args[0]
-        if isinstance(arg, (ast.Str, ast.Constant)) and isinstance(getattr(arg, "s", None) or arg.value, str):
-            gvar_id = arg.s if isinstance(arg, ast.Str) else arg.value
+
+        async def _validate_gvar(arg_node: ast.AST):
+            gvar_id = _literal_value(arg_node)
+            if gvar_id is None or gvar_id in seen:
+                return
+            seen.add(gvar_id)
             found_local = resolver.get_local(gvar_id)
             ensured = found_local is not None or await resolver.ensure(gvar_id)
             if not ensured:
                 diagnostics.append(
                     _make_diagnostic(
-                        arg,
+                        arg_node,
                         f"Unknown gvar '{gvar_id}'",
                         settings.semantic_level,
                     )
                 )
+
+        if node.func.id == "get_gvar":
+            if node.args:
+                await _validate_gvar(node.args[0])
+        elif node.func.id == "using":
+            for kw in node.keywords:
+                await _validate_gvar(kw.value)
     return diagnostics
 
 

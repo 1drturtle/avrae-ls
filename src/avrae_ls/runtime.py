@@ -7,6 +7,7 @@ import ast
 import json
 import random
 import math
+from types import SimpleNamespace
 try:  # optional dependency
     import yaml
 except ImportError:  # pragma: no cover - fallback when PyYAML is absent
@@ -220,12 +221,16 @@ class MockExecutor:
                 runtime_character = CharacterAPI(ctx_data.character)
             return runtime_character  # type: ignore[return-value]
 
+        import_cache: dict[str, SimpleNamespace] = {}
+        import_stack: list[str] = []
         builtins = self._build_builtins(
             ctx_data,
             resolver,
             buffer,
             character_provider=_character_provider,
             interpreter_ref=interpreter_ref,
+            import_cache=import_cache,
+            import_stack=import_stack,
         )
         interpreter = draconic.DraconicInterpreter(
             builtins=builtins,
@@ -266,10 +271,14 @@ class MockExecutor:
         buffer: io.StringIO,
         character_provider: Callable[[], CharacterAPI] | None = None,
         interpreter_ref: Dict[str, draconic.DraconicInterpreter | None] | None = None,
+        import_cache: Dict[str, SimpleNamespace] | None = None,
+        import_stack: list[str] | None = None,
     ) -> Dict[str, Any]:
         builtins = dict(self._base_builtins)
         var_store = ctx_data.vars
         interpreter_ref = interpreter_ref or {"interpreter": None}
+        import_cache = import_cache or {}
+        import_stack = import_stack or []
 
         def _print(*args, sep=" ", end="\n"):
             buffer.write(sep.join(map(str, args)) + end)
@@ -323,11 +332,50 @@ class MockExecutor:
             interp = interpreter_ref.get("interpreter")
             if interp is None:
                 return None
+            user_ns = getattr(interp, "_names", {})
+
+            def _load_module(addr: str) -> SimpleNamespace:
+                if addr in import_cache:
+                    return import_cache[addr]
+                if resolver is None:
+                    raise ModuleNotFoundError(f"No gvar named {addr!r}")
+                mod_contents = resolver.get_local(addr)
+                if mod_contents is None:
+                    raise ModuleNotFoundError(f"No gvar named {addr!r}")
+
+                old_names = getattr(interp, "_names", {})
+                depth_increased = False
+                try:
+                    interp._names = {}
+                    interp._depth += 1
+                    depth_increased = True
+                    if interp._depth > interp._config.max_recursion_depth:
+                        raise RecursionError("Maximum recursion depth exceeded")
+                    interp.execute_module(str(mod_contents), module_name=addr)
+                    mod_ns = SimpleNamespace(**getattr(interp, "_names", {}))
+                    import_cache[addr] = mod_ns
+                    return mod_ns
+                finally:
+                    if depth_increased:
+                        interp._depth -= 1
+                    interp._names = old_names
+
             for ns, addr in imports.items():
-                val = None
-                if resolver:
-                    val = resolver.get_local(addr)
-                interp._names[str(ns)] = val  # type: ignore[attr-defined]
+                addr_str = str(addr)
+                if addr_str in import_stack:
+                    circle = " imports\n".join(import_stack)
+                    raise ImportError(f"Circular import detected!\n{circle} imports\n{addr_str}")
+                import_stack.append(addr_str)
+                try:
+                    mod_ns = _load_module(addr_str)
+                finally:
+                    import_stack.pop()
+                name = str(ns)
+                if name in interp.builtins:
+                    raise ValueError(f"{name} is already builtin (no shadow assignments).")
+                user_ns[name] = mod_ns
+
+            interp._names = user_ns
             return None
 
         def _signature(data=0):
@@ -449,12 +497,20 @@ def _literal_gvars(code: str) -> Set[str]:
 
     gvars: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "get_gvar":
-            if not node.args:
-                continue
-            arg = node.args[0]
-            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                gvars.add(arg.value)
-            elif isinstance(arg, ast.Str):
-                gvars.add(arg.s)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id == "get_gvar":
+                if not node.args:
+                    continue
+                arg = node.args[0]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    gvars.add(arg.value)
+                elif isinstance(arg, ast.Str):
+                    gvars.add(arg.s)
+            elif node.func.id == "using":
+                for kw in node.keywords:
+                    val = kw.value
+                    if isinstance(val, ast.Constant) and isinstance(val.value, str):
+                        gvars.add(val.value)
+                    elif isinstance(val, ast.Str):
+                        gvars.add(val.s)
     return gvars

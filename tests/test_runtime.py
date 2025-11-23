@@ -18,7 +18,7 @@ def _resolver(tmp_path):
 
     cfg = AvraeLSConfig.default(tmp_path)
     res = GVarResolver(cfg)
-    res.reset({"foo": "bar"})
+    res.reset({"foo": "bar", "mod": "answer = 'module-value'"})
     return res
 
 
@@ -243,6 +243,33 @@ async def test_get_gvar_prefetches_literal(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_using_prefetches_literal(tmp_path):
+    from avrae_ls.config import AvraeLSConfig
+
+    cfg = AvraeLSConfig.default(tmp_path)
+
+    class _ModuleResolver(GVarResolver):
+        def __init__(self, cfg):
+            super().__init__(cfg)
+            self.calls: list[str] = []
+
+        async def ensure(self, key: str) -> bool:
+            key = str(key)
+            self.calls.append(key)
+            self._cache[key] = "answer = 'ensured'"
+            return True
+
+    resolver = _ModuleResolver(cfg)
+    ctx = _ctx()
+    executor = MockExecutor()
+
+    result = await executor.run("using(mod='abc123')\nmod.answer", ctx, resolver)
+    assert result.error is None
+    assert result.value == "ensured"
+    assert resolver.calls == ["abc123"]
+
+
+@pytest.mark.asyncio
 async def test_uvar_helpers_available(tmp_path):
     executor = MockExecutor()
     ctx = ContextData(vars=VarSources(uvars={"foo": "orig"}))
@@ -291,13 +318,13 @@ async def test_reference_helpers_available(tmp_path):
             "randchoice([1,2,3])",
             "load_json(dump_json({'a': 1}))['a']",
             "parse_coins('1')",
-            "using(mod='foo')",
-            "mod",
+            "using(mod='mod')",
+            "mod.answer",
         ]
     )
     result = await executor.run(code, ctx, resolver)
     assert result.error is None
-    assert isinstance(result.value, str)
+    assert result.value == "module-value"
 
 
 def test_documented_builtins_present():

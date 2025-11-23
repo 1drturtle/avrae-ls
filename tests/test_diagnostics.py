@@ -74,6 +74,17 @@ async def test_fetches_gvar_when_enabled(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_using_marks_imported_name_defined(tmp_path):
+    provider = _provider()
+    resolver = _resolver(tmp_path)
+    resolver.reset({"mod": "answer = 'ok'"})
+    ctx_data = ContextData(vars=VarSources())
+
+    diags = await provider.analyze("using(mod='mod')\nmod.answer", ctx_data, resolver)
+    assert diags == []
+
+
+@pytest.mark.asyncio
 async def test_for_loop_binds_target(tmp_path):
     provider = _provider()
     resolver = _resolver(tmp_path)
