@@ -93,31 +93,49 @@ class GVarResolver:
     async def ensure(self, key: str) -> bool:
         key = str(key)
         if key in self._cache:
+            log.debug("GVAR ensure cache hit for %s", key)
             return True
         if not self._config.enable_gvar_fetch:
+            log.warning("GVAR fetch disabled; skipping %s", key)
             return False
         if not self._config.service.token:
             log.debug("GVAR fetch skipped for %s: no token configured", key)
             return False
 
         base_url = self._config.service.base_url.rstrip("/")
-        url = f"{base_url}/gvars/{key}"
-        headers = {"Authorization": f"Bearer {self._config.service.token}"}
+        url = f"{base_url}/customizations/gvars/{key}"
+        # Avrae service expects the JWT directly in Authorization (no Bearer prefix).
+        headers = {"Authorization": str(self._config.service.token)}
         try:
+            log.debug("GVAR fetching %s from %s", key, url)
             async with httpx.AsyncClient(timeout=5) as client:
                 resp = await client.get(url, headers=headers)
         except Exception as exc:
-            log.debug("GVAR fetch failed for %s: %s", key, exc)
+            log.error("GVAR fetch failed for %s: %s", key, exc)
             return False
 
         if resp.status_code != 200:
-            log.debug("GVAR fetch returned %s for %s", resp.status_code, key)
+            log.warning(
+                "GVAR fetch returned %s for %s (body: %s)",
+                resp.status_code,
+                key,
+                (resp.text or "").strip(),
+            )
             return False
 
-        payload = resp.json()
-        value = payload.get("value") or payload.get("content") or payload.get("body")
+        value: Any = None
+        try:
+            payload = resp.json()
+        except Exception:
+            payload = None
+
+        if isinstance(payload, dict) and "value" in payload:
+            value = payload["value"]
+
+        log.debug("GVAR fetch parsed value for %s (type=%s)", key, type(value).__name__)
+
         if value is None:
-            log.debug("GVAR %s payload missing value", key)
+            log.error("GVAR %s payload missing value", key)
             return False
         self._cache[key] = value
         return True

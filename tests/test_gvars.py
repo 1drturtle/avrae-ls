@@ -41,3 +41,44 @@ def test_context_builder_preserves_cached_gvars(tmp_path):
     builder.build("default")
 
     assert resolver.get_local("cached") == "value"
+
+
+@pytest.mark.asyncio
+async def test_missing_gvar_fetches_when_enabled(monkeypatch):
+    cfg = AvraeLSConfig.default(Path("."))
+    cfg.enable_gvar_fetch = True
+    cfg.service.token = "token"
+    resolver = GVarResolver(cfg)
+
+    captured = {}
+
+    class DummyResponse:
+        status_code = 200
+        text = "example gvar text"
+
+        def json(self):
+            return {"value": self.text}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            captured["url"] = url
+            captured["headers"] = headers or {}
+            return DummyResponse()
+
+    monkeypatch.setattr("avrae_ls.context.httpx.AsyncClient", DummyClient)
+
+    fetched = await resolver.ensure("abc123")
+
+    assert fetched is True
+    assert resolver.get_local("abc123") == DummyResponse.text
+    assert captured["url"].endswith("/customizations/gvars/abc123")
+    assert captured["headers"].get("Authorization") == "token"

@@ -61,7 +61,22 @@
         "command": "avrae-ls.showPreview",
         "title": "Avrae: Show Alias Preview"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Avrae LS",
+      "properties": {
+        "avraeLS.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "markdownDescription": "Trace level for the Avrae language server (same behavior as other VS Code LSP extensions)."
+        }
+      }
+    }
   },
   "scripts": {
     "build": "npm run bundle",

@@ -8,15 +8,15 @@ let previewArgsState = "";
 let lastPreviewDocument = undefined;
 
 function activate(context) {
-  const serverCommand = "uv";
-  const serverArgs = ["tool", "run", "avrae-ls"];
+  const serverCommand = "avrae-ls";
+  // const serverArgs = ["tool", "run", "avrae-ls"];
 
   // Ensure the server runs from the repo root even if the extension host is launched elsewhere.
 
   /** @type {Executable} */
   const serverOptions = {
     command: serverCommand,
-    args: serverArgs,
+    // args: serverArgs,
     transport: TransportKind.stdio,
   };
 
@@ -178,8 +178,8 @@ function activate(context) {
     const previewLabel = result.commandName === "embed" ? "Embed" : "Preview";
     const renderedPreview = canPreview
       ? `<div class="preview"><strong>${previewLabel}:</strong><pre class="block">${escapeHtml(
-          String(result.result)
-        )}</pre></div>`
+        String(result.result)
+      )}</pre></div>`
       : "";
 
     previewPanel.webview.html = `<!DOCTYPE html>

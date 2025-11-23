@@ -4,7 +4,7 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
 
 ## Install (released package)
 
-- CLI/server via `uv tool` (preferred): `uv tool install avrae-ls` then `uv tool run avrae-ls --help` to see stdio/TCP options (same as `python -m avrae_ls`). The VS Code extension uses this invocation by default. The draconic interpreter is vendored, so no Git deps are needed.
+- CLI/server via `uv tool` (preferred): `uv tool install avrae-ls` then `avrae-ls --help` to see stdio/TCP options (same as `python -m avrae_ls`). The VS Code extension uses this invocation by default. The draconic interpreter is vendored, so no Git deps are needed.
 
 ## VS Code extension (released)
 
@@ -18,10 +18,11 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
 - Build everything locally: `make package` (wheel + VSIX in `dist/`).
 - Run tests/lint: `make check`.
 - Run via uv tool from source: `uv tool install --from . avrae-ls`.
+- Run diagnostics for a single file (stdout + stderr logs): `avrae-ls --analyze path/to/alias.txt --log-level DEBUG`.
 
 ## Releasing (maintainers)
 
 1. Bump `pyproject.toml` version.
-2. `make release` (clean, build, `twine check`, upload to PyPI).
+2. `make release` (clean, build, upload to PyPI).
 3. Build and attach the VSIX to the GitHub release (`make vsix`).
 4. Tag and push.
