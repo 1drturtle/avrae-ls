@@ -7,6 +7,8 @@ on:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,7 +46,7 @@ jobs:
         with:
           files: |
             dist/avrae_ls-*.whl
-            dist/avrae-ls-*.tar.gz
+            dist/avrae_ls-*.tar.gz
             dist/avrae-ls-client.vsix
 
       - name: Publish to PyPI

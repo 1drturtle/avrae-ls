@@ -38,6 +38,7 @@ line-length = 120
 target-version = "py311"
 exclude = [
     "avrae",
+    "src/draconic"
 ]
 
 [tool.setuptools.package-data]
