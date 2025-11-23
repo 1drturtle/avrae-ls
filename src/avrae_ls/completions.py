@@ -299,15 +299,27 @@ def _infer_type_map(code: str) -> Dict[str, str]:
                 type_map[node.target.id] = val_type
             self.generic_visit(node)
 
-        @staticmethod
-        def _value_type(value: ast.AST | None) -> Optional[str]:
+        def _value_type(self, value: ast.AST | None) -> Optional[str]:
             if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
                 if value.func.id in {"character", "combat"}:
                     return value.func.id
                 if value.func.id == "vroll":
                     return "SimpleRollResult"
-            if isinstance(value, ast.Name) and value.id in {"character", "combat", "ctx"}:
-                return value.id
+            if isinstance(value, ast.Name):
+                if value.id in type_map:
+                    return type_map[value.id]
+                if value.id in {"character", "combat", "ctx"}:
+                    return value.id
+            if isinstance(value, ast.Attribute):
+                attr_name = value.attr
+                base_type = None
+                if isinstance(value.value, ast.Name):
+                    base_type = type_map.get(value.value.id)
+                if base_type is None:
+                    base_type = self._value_type(value.value)
+                if base_type and attr_name in TYPE_MAP:
+                    return attr_name
+                return None
             return None
 
     Visitor().visit(tree)

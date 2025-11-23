@@ -181,7 +181,10 @@ def on_signature_help(server: AvraeLanguageServer, params: types.SignatureHelpPa
     return None
 
 
-@ls.feature(types.TEXT_DOCUMENT_COMPLETION)
+@ls.feature(
+    types.TEXT_DOCUMENT_COMPLETION,
+    types.CompletionOptions(trigger_characters=["."]),
+)
 def on_completion(server: AvraeLanguageServer, params: types.CompletionParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
     ctx_data = server.state.context_builder.build()

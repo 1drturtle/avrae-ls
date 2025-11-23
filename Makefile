@@ -8,6 +8,7 @@ PY_SOURCES = src tests
 
 install:
 	$(UV) sync --all-extras
+	$(UV) tool install .
 
 lint:
 	$(UV) run ruff check $(PY_SOURCES)

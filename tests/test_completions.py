@@ -21,3 +21,10 @@ def test_attribute_completion_from_variable_binding():
     labels = {item.label for item in items}
     assert "levels" in labels
     assert "name" in labels
+
+
+def test_nested_attributes_completion():
+    code = "x = character()\ny = x.levels\nz = y."
+    items = completion_items_for_position(code, line=2, character=len("z = y."), suggestions=[])
+    labels = {item.label for item in items}
+    assert len(labels) != 0
