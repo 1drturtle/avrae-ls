@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import io
-import logging
-import time
 import ast
+import io
 import json
-import random
+import logging
 import math
+import random
+import time
 from types import SimpleNamespace
 try:  # optional dependency
     import yaml
@@ -17,10 +17,11 @@ from typing import Any, Dict, Set, Callable
 
 import d20
 import draconic
+import httpx
 from draconic.interpreter import _Break, _Continue, _Return
 
 from .context import ContextData, GVarResolver
-from .config import VarSources
+from .config import AvraeServiceConfig, VarSources
 from .api import AliasContextAPI, CharacterAPI, SimpleCombat, SimpleRollResult
 from . import argparser as avrae_argparser
 # Minimal stand-in for Avrae's AliasException
@@ -157,8 +158,9 @@ def _default_builtins() -> Dict[str, Any]:
 
 
 class MockExecutor:
-    def __init__(self):
+    def __init__(self, service_config: AvraeServiceConfig | None = None):
         self._base_builtins = _default_builtins()
+        self._service_config = service_config or AvraeServiceConfig()
 
     def available_names(self, ctx_data: ContextData) -> Set[str]:
         builtin_names = set(self._base_builtins.keys())
@@ -279,6 +281,10 @@ class MockExecutor:
         interpreter_ref = interpreter_ref or {"interpreter": None}
         import_cache = import_cache or {}
         import_stack = import_stack or []
+        service_cfg = self._service_config
+        verify_cache_sig: str | None = None
+        verify_cache_result: Dict[str, Any] | None = None
+        verify_cache_error: ValueError | None = None
 
         def _print(*args, sep=" ", end="\n"):
             buffer.write(sep.join(map(str, args)) + end)
@@ -292,22 +298,25 @@ class MockExecutor:
             return var_store.svars.get(str(name), default)
 
         def _get_cvar(name: str, default=None):
-            return var_store.cvars.get(str(name), default)
+            val = var_store.cvars.get(str(name), default)
+            return str(val) if val is not None else default
 
         def _get_uvar(name: str, default=None):
-            return var_store.uvars.get(str(name), default)
+            val = var_store.uvars.get(str(name), default)
+            return str(val) if val is not None else default
 
         def _get_uvars():
-            return dict(var_store.uvars)
+            return {k: (str(v) if v is not None else v) for k, v in var_store.uvars.items()}
 
         def _set_uvar(name: str, value: Any):
-            var_store.uvars[str(name)] = value
-            return value
+            str_val = str(value) if value is not None else None
+            var_store.uvars[str(name)] = str_val
+            return str_val
 
         def _set_uvar_nx(name: str, value: Any):
             key = str(name)
             if key not in var_store.uvars:
-                var_store.uvars[key] = value
+                var_store.uvars[key] = str(value) if value is not None else None
             return var_store.uvars[key]
 
         def _delete_uvar(name: str):
@@ -316,17 +325,29 @@ class MockExecutor:
         def _uvar_exists(name: str) -> bool:
             return str(name) in var_store.uvars
 
-        def _exists(name: str) -> bool:
+        def _resolve_name(key: str) -> tuple[bool, Any]:
+            key = str(key)
             interp = interpreter_ref.get("interpreter")
-            if interp is None:
-                return False
-            return str(name) in getattr(interp, "_names", {})
+            if interp is not None:
+                names = getattr(interp, "_names", {})
+                if key in names:
+                    return True, names[key]
+
+            if key in var_store.cvars:
+                return True, var_store.cvars[key]
+
+            if key in var_store.uvars:
+                return True, var_store.uvars[key]
+
+            return False, None
+
+        def _exists(name: str) -> bool:
+            found, _ = _resolve_name(name)
+            return found
 
         def _get(name: str, default=None):
-            interp = interpreter_ref.get("interpreter")
-            if interp is None:
-                return default
-            return getattr(interp, "_names", {}).get(str(name), default)
+            found, value = _resolve_name(name)
+            return value if found else default
 
         def _using(**imports):
             interp = interpreter_ref.get("interpreter")
@@ -379,13 +400,61 @@ class MockExecutor:
             return None
 
         def _signature(data=0):
-            return f"signature:{int(data)}"
+            try:
+                data = int(data)
+            except ValueError:
+                raise TypeError(f"Data {data} could not be converted to integer.")
+            return f"mock-signature:{int(data)}"
 
         def _verify_signature(sig):
+            nonlocal verify_cache_sig, verify_cache_result, verify_cache_error
+            sig_str = str(sig)
+            if sig_str == verify_cache_sig:
+                if verify_cache_error:
+                    raise verify_cache_error
+                return verify_cache_result
+
+            verify_cache_sig = sig_str
+            verify_cache_error = None
+            verify_cache_result = None
+
+            def _call_verify_api(signature: str) -> Dict[str, Any]:
+                base_url = (service_cfg.base_url if service_cfg else AvraeServiceConfig.base_url).rstrip("/")
+                url = f"{base_url}/bot/signature/verify"
+                headers = {"Content-Type": "application/json"}
+                if service_cfg and service_cfg.token:
+                    headers["Authorization"] = str(service_cfg.token)
+                try:
+                    resp = httpx.post(url, json={"signature": signature}, headers=headers, timeout=5)
+                except Exception as exc:
+                    raise ValueError(f"Failed to verify signature: {exc}") from exc
+
+                try:
+                    payload = resp.json()
+                except Exception as exc:
+                    raise ValueError("Failed to verify signature: invalid response body") from exc
+
+                if resp.status_code != 200:
+                    message = payload.get("error") if isinstance(payload, dict) else None
+                    raise ValueError(message or f"Failed to verify signature: HTTP {resp.status_code}")
+
+                if not isinstance(payload, dict):
+                    raise ValueError("Failed to verify signature: invalid response")
+                if payload.get("success") is not True:
+                    message = payload.get("error")
+                    raise ValueError(message or "Failed to verify signature: unsuccessful response")
+
+                data = payload.get("data")
+                if not isinstance(data, dict):
+                    raise ValueError("Failed to verify signature: malformed response")
+                return data
+
             try:
-                return {"signature": str(sig), "valid": True}
-            except Exception:
-                return {"signature": None, "valid": False}
+                verify_cache_result = _call_verify_api(sig_str)
+            except ValueError as exc:
+                verify_cache_error = exc
+                raise
+            return verify_cache_result
 
         def _argparse(args, character=None, splitter=avrae_argparser.argsplit, parse_ephem=True):
             return avrae_argparser.argparse(args, character=character, splitter=splitter, parse_ephem=parse_ephem)

@@ -68,7 +68,7 @@ class AvraeLanguageServer(LanguageServer):
 
     def load_workspace(self, root: Path) -> None:
         config, warnings = load_config(root)
-        executor = MockExecutor()
+        executor = MockExecutor(config.service)
         context_builder = ContextBuilder(config)
         diagnostics = DiagnosticProvider(executor, config.diagnostics)
         self._state = ServerState(

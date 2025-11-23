@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any, ClassVar, Iterable, Mapping, MutableMapping, Optional, Sequence
 
 import d20
 
@@ -203,31 +203,37 @@ class AliasContextAPI(_DirMixin):
 
     @property
     def guild(self) -> GuildAPI | None:
+        """Guild info for the alias invocation (server context)."""
         guild_data = self.data.get("guild")
         return GuildAPI(guild_data) if guild_data is not None else None
 
     @property
     def channel(self) -> ChannelAPI | None:
+        """Channel where the alias was invoked."""
         channel_data = self.data.get("channel")
         return ChannelAPI(channel_data) if channel_data is not None else None
 
     @property
     def author(self) -> AuthorAPI | None:
+        """User who invoked the alias."""
         author_data = self.data.get("author")
         return AuthorAPI(author_data) if author_data is not None else None
 
     @property
     def prefix(self) -> str | None:
+        """Command prefix that triggered the alias (e.g., `!`)."""
         val = self.data.get("prefix")
         return str(val) if val is not None else None
 
     @property
     def alias(self) -> str | None:
+        """Alias name that was run."""
         val = self.data.get("alias")
         return str(val) if val is not None else None
 
     @property
     def message_id(self) -> int | None:
+        """Discord message id for the invocation."""
         raw = self.data.get("message_id")
         return int(raw) if raw is not None else None
 
@@ -928,24 +934,29 @@ class AliasAction(_DirMixin):
 
     @property
     def name(self) -> str:
+        """Action name."""
         return str(self.data.get("name", "Action"))
 
     @property
     def activation_type(self) -> int | None:
+        """Numeric activation type (matches Avrae constants)."""
         raw = self.data.get("activation_type")
         return int(raw) if raw is not None else None
 
     @property
     def activation_type_name(self) -> str | None:
+        """Human-readable activation type (e.g., ACTION, BONUS_ACTION)."""
         val = self.data.get("activation_type_name")
         return str(val) if val is not None else None
 
     @property
     def description(self) -> str:
+        """Long description of the action."""
         return str(self.data.get("description", ""))
 
     @property
     def snippet(self) -> str:
+        """Short snippet shown in the sheet for the action."""
         return str(self.data.get("snippet", self.description))
 
     def __str__(self) -> str:
@@ -1102,22 +1113,27 @@ class AliasStatBlock(_DirMixin):
 
     @property
     def name(self) -> str:
+        """Character or statblock name."""
         return str(self.data.get("name", "Statblock"))
 
     @property
     def stats(self) -> AliasBaseStats:
+        """Ability scores and proficiency bonus helper."""
         return AliasBaseStats(self.data.get("stats") or {}, prof_bonus_override=self._prof_bonus())
 
     @property
     def levels(self) -> AliasLevels:
+        """Class levels keyed by class name."""
         return AliasLevels(self.data.get("levels") or self.data.get("class_levels") or {})
 
     @property
     def attacks(self) -> AliasAttackList:
+        """Attacks available on the statblock."""
         return AliasAttackList(self.data.get("attacks") or [], self.data)
 
     @property
     def skills(self) -> AliasSkills:
+        """Skill bonuses computed from abilities and prof bonus."""
         abilities = {
             "strength": self.stats.strength,
             "dexterity": self.stats.dexterity,
@@ -1130,6 +1146,7 @@ class AliasStatBlock(_DirMixin):
 
     @property
     def saves(self) -> AliasSaves:
+        """Saving throw bonuses computed from abilities and prof bonus."""
         abilities = {
             "strength": self.stats.strength,
             "dexterity": self.stats.dexterity,
@@ -1148,41 +1165,50 @@ class AliasStatBlock(_DirMixin):
 
     @property
     def resistances(self) -> AliasResistances:
+        """Damage resistances, immunities, and vulnerabilities."""
         return AliasResistances(self.data.get("resistances") or {})
 
     @property
     def ac(self) -> int | None:
+        """Armor class."""
         raw = self.data.get("ac")
         return int(raw) if raw is not None else None
 
     @property
     def max_hp(self) -> int | None:
+        """Maximum hit points."""
         raw = self.data.get("max_hp")
         return int(raw) if raw is not None else None
 
     @property
     def hp(self) -> int | None:
+        """Current hit points."""
         raw = self.data.get("hp")
         return int(raw) if raw is not None else None
 
     @property
     def temp_hp(self) -> int:
+        """Temporary hit points."""
         return _safe_int(self.data.get("temp_hp"), 0)
 
     @property
     def spellbook(self) -> AliasSpellbook:
+        """Known/prepared spells grouped by level."""
         return AliasSpellbook(self.data.get("spellbook") or {})
 
     @property
     def creature_type(self) -> str | None:
+        """Creature type (e.g., humanoid, undead)."""
         val = self.data.get("creature_type")
         return str(val) if val is not None else None
 
     def set_hp(self, new_hp: int) -> int:
+        """Set current hit points."""
         self.data["hp"] = int(new_hp)
         return self.data["hp"]
 
     def modify_hp(self, amount: int, ignore_temp: bool = False, overflow: bool = True) -> int:
+        """Adjust hit points by `amount`, respecting overflow limits when requested."""
         hp = self.hp or 0
         new_hp = hp + int(amount)
         if not overflow and self.max_hp is not None:
@@ -1191,15 +1217,18 @@ class AliasStatBlock(_DirMixin):
         return new_hp
 
     def hp_str(self) -> str:
+        """String summary of HP and temp HP."""
         return f"{self.hp}/{self.max_hp} (+{self.temp_hp} temp)"
 
     def reset_hp(self) -> int:
+        """Restore to max HP and clear temp HP."""
         if self.max_hp is not None:
             self.data["hp"] = self.max_hp
         self.data["temp_hp"] = 0
         return self.hp or 0
 
     def set_temp_hp(self, new_temp: int) -> int:
+        """Set temporary hit points."""
         self.data["temp_hp"] = int(new_temp)
         return self.temp_hp
 
@@ -1268,77 +1297,99 @@ class CharacterAPI(AliasStatBlock):
 
     @property
     def actions(self) -> list[AliasAction]:
+        """Actions on the character sheet (mapped from Beyond/custom actions)."""
         acts = self.data.get("actions") or []
         return [AliasAction(a, self.data) for a in acts]
 
     @property
     def coinpurse(self) -> AliasCoinpurse:
+        """Coin totals by denomination."""
         return AliasCoinpurse(self.data.get("coinpurse") or {})
 
     @property
     def csettings(self) -> Mapping[str, Any]:
+        """Character settings blob."""
         return self.data.get("csettings", {})
 
     @property
     def race(self) -> str | None:
+        """Race label."""
         val = self.data.get("race")
         return str(val) if val is not None else None
 
     @property
     def background(self) -> str | None:
+        """Background name."""
         val = self.data.get("background")
         return str(val) if val is not None else None
 
     @property
     def owner(self) -> int | None:
+        """Discord user id of the owning account."""
         raw = self.data.get("owner")
         return int(raw) if raw is not None else None
 
     @property
     def upstream(self) -> str | None:
+        """Upstream character id (e.g., Beyond character slug)."""
         val = self.data.get("upstream")
         return str(val) if val is not None else None
 
     @property
     def sheet_type(self) -> str | None:
+        """Source sheet provider (beyond, custom, etc.)."""
         val = self.data.get("sheet_type")
         return str(val) if val is not None else None
 
     @property
     def cvars(self) -> Mapping[str, Any]:
+        """Character variables (string values)."""
         return dict(self.data.get("cvars") or {})
 
-    def get_cvar(self, name: str, default: Any = None) -> Any:
-        return self.data.setdefault("cvars", {}).get(str(name), default)
+    def get_cvar(self, name: str, default: Any = None) -> Optional[str]:
+        """Fetch a character variable, returning `default` if missing."""
+        val = self.data.setdefault("cvars", {}).get(str(name), default)
+        return str(val) if val is not None else default
 
-    def set_cvar(self, name: str, val: Any) -> Any:
-        self.data.setdefault("cvars", {})[str(name)] = val
-        return val
+    def set_cvar(self, name: str, val: str) -> Optional[str]:
+        """Sets a character variable. Avrae stores cvars as strings."""
+        str_val = str(val) if val is not None else None
+        self.data.setdefault("cvars", {})[str(name)] = str_val
+        return str_val
 
-    def set_cvar_nx(self, name: str, val: Any) -> Any:
+    def set_cvar_nx(self, name: str, val: str) -> str:
+        """Set a character variable only if it does not already exist."""
         cvars = self.data.setdefault("cvars", {})
-        return cvars.setdefault(str(name), val)
+        str_val = str(val) if val is not None else None
+        return cvars.setdefault(str(name), str_val)
 
-    def delete_cvar(self, name: str) -> Any:
+    def delete_cvar(self, name: str) -> Optional[str]:
+        """Delete a character variable and return its old value if present."""
         return self.data.setdefault("cvars", {}).pop(str(name), None)
 
     @property
     def consumables(self) -> list[AliasCustomCounter]:
+        """Custom counters/consumables on the character."""
         return [AliasCustomCounter(v) for v in self._consumable_map().values()]
 
     def cc(self, name: str) -> AliasCustomCounter:
+        """Get (or create placeholder for) a custom counter by name."""
         return AliasCustomCounter(self._consumable_map()[str(name)])
 
     def get_cc(self, name: str) -> int:
+        """Current value of a custom counter."""
         return self.cc(name).value
 
     def get_cc_max(self, name: str) -> int:
+        """Maximum value for a custom counter."""
         return self.cc(name).max
 
     def get_cc_min(self, name: str) -> int:
+        """Minimum value for a custom counter."""
         return self.cc(name).min
 
     def set_cc(self, name: str, value: int | None = None, maximum: int | None = None, minimum: int | None = None) -> int:
+        """Set value/max/min for a custom counter."""
         con = self._consumable_map().setdefault(str(name), {"name": str(name)})
         if value is not None:
             con["value"] = int(value)
@@ -1349,10 +1400,12 @@ class CharacterAPI(AliasStatBlock):
         return _safe_int(con.get("value"), 0)
 
     def mod_cc(self, name: str, val: int, strict: bool = False) -> int:
+        """Modify a custom counter by `val` (optionally enforcing bounds)."""
         counter = self.cc(name)
         return counter.mod(val, strict)
 
     def delete_cc(self, name: str) -> Any:
+        """Remove a custom counter and return its payload."""
         return self._consumable_map().pop(str(name), None)
 
     def create_cc_nx(
@@ -1368,6 +1421,7 @@ class CharacterAPI(AliasStatBlock):
         desc: str | None = None,
         initial_value: str | None = None,
     ) -> AliasCustomCounter:
+        """Create a custom counter if missing, preserving existing ones."""
         if not self.cc_exists(name):
             self.create_cc(
                 name,
@@ -1396,6 +1450,7 @@ class CharacterAPI(AliasStatBlock):
         desc: str | None = None,
         initial_value: str | None = None,
     ) -> AliasCustomCounter:
+        """Create or overwrite a custom counter."""
         payload = {
             "name": str(name),
             "min": _safe_int(minVal, -(2**31)) if minVal is not None else -(2**31),
@@ -1424,6 +1479,7 @@ class CharacterAPI(AliasStatBlock):
         desc: Any = UNSET,
         new_name: str | None = None,
     ) -> AliasCustomCounter:
+        """Edit fields on an existing custom counter."""
         counter = dict(self._consumable_map().get(str(name)) or {"name": str(name)})
         for key, val in (
             ("min", minVal),
@@ -1443,22 +1499,27 @@ class CharacterAPI(AliasStatBlock):
         return AliasCustomCounter(counter)
 
     def cc_exists(self, name: str) -> bool:
+        """Return True if a custom counter with the name exists."""
         return str(name) in self._consumable_map()
 
     def cc_str(self, name: str) -> str:
+        """String form of a custom counter."""
         return str(self.cc(name))
 
     @property
     def death_saves(self) -> AliasDeathSaves:
+        """Death save successes/failures."""
         return AliasDeathSaves(self.data.get("death_saves") or {})
 
     @property
     def description(self) -> str | None:
+        """Character description/biography."""
         val = self.data.get("description")
         return str(val) if val is not None else None
 
     @property
     def image(self) -> str | None:
+        """Avatar or sheet image URL."""
         val = self.data.get("image")
         return str(val) if val is not None else None
 
@@ -1583,55 +1644,67 @@ class SimpleCombatant(AliasStatBlock):
 
     @property
     def id(self) -> str | None:
+        """Unique combatant id."""
         val = self.data.get("id")
         return str(val) if val is not None else None
 
     @property
     def effects(self) -> list[SimpleEffect]:
+        """Active effects on the combatant."""
         return [SimpleEffect(e) for e in self.data.get("effects", [])]
 
     @property
     def init(self) -> int:
+        """Initiative score."""
         return _safe_int(self.data.get("init"), 0)
 
     @property
     def initmod(self) -> int:
+        """Initiative modifier."""
         return _safe_int(self.data.get("initmod"), 0)
 
     @property
     def type(self) -> str:
+        """Combatant type (combatant/group)."""
         return str(self.data.get("type", "combatant"))
 
     @property
     def note(self) -> str | None:
+        """DM note attached to the combatant."""
         val = self.data.get("note")
         return str(val) if val is not None else None
 
     @property
     def controller(self) -> int | None:
+        """Discord id of the controller (if any)."""
         raw = self.data.get("controller")
         return int(raw) if raw is not None else None
 
     @property
     def group(self) -> str | None:
+        """Group name the combatant belongs to."""
         val = self.data.get("group")
         return str(val) if val is not None else None
 
     @property
     def race(self) -> str | None:
+        """Race/creature type label."""
         val = self.data.get("race")
         return str(val) if val is not None else None
 
     @property
     def monster_name(self) -> str | None:
+        """Monster name if this combatant represents a monster."""
         val = self.data.get("monster_name")
         return str(val) if val is not None else None
 
     @property
     def is_hidden(self) -> bool:
+        """Whether the combatant is hidden in the tracker."""
         return bool(self.data.get("is_hidden", False))
 
     def save(self, ability: str, adv: bool | None = None) -> SimpleRollResult:
+        """Roll a saving throw using the combatant's stats."""
         roll_expr = self.saves.get(ability).d20(base_adv=adv)
         try:
             roll_result = d20.roll(roll_expr)
@@ -1648,6 +1721,7 @@ class SimpleCombatant(AliasStatBlock):
         critdice: int = 0,
         overheal: bool = False,
     ) -> dict[str, Any]:
+        """Apply damage expression to the combatant and return the roll breakdown."""
         expr = str(dice_str)
         if crit:
             expr = f"({expr})*2"
@@ -1665,25 +1739,32 @@ class SimpleCombatant(AliasStatBlock):
         return {"damage": f"**{label}**: {roll_result}", "total": roll_result.total, "roll": SimpleRollResult(roll_result)}
 
     def set_ac(self, ac: int) -> None:
+        """Set armor class."""
         self.data["ac"] = int(ac)
 
     def set_maxhp(self, maxhp: int) -> None:
+        """Set maximum HP."""
         self.data["max_hp"] = int(maxhp)
 
     def set_init(self, init: int) -> None:
+        """Set initiative score."""
         self.data["init"] = int(init)
 
     def set_name(self, name: str) -> None:
+        """Rename the combatant."""
         self.data["name"] = str(name)
 
     def set_group(self, group: str | None) -> str | None:
+        """Assign the combatant to a group."""
         self.data["group"] = str(group) if group is not None else None
         return self.group
 
     def set_note(self, note: str) -> None:
+        """Attach/update a DM note."""
         self.data["note"] = str(note) if note is not None else None
 
     def get_effect(self, name: str, strict: bool = False) -> SimpleEffect | None:
+        """Find an effect by name (optionally requiring exact match)."""
         name_lower = str(name).lower()
         for effect in self.effects:
             if strict and effect.name.lower() == name_lower:
@@ -1706,6 +1787,7 @@ class SimpleCombatant(AliasStatBlock):
         buttons: list[dict] | None = None,
         tick_on_combatant_id: str | None = None,
     ) -> SimpleEffect:
+        """Add a new effect to the combatant."""
         duration_val = int(duration) if duration is not None else None
         desc_val = str(desc) if desc is not None else None
         payload: dict[str, Any] = {
@@ -1739,6 +1821,7 @@ class SimpleCombatant(AliasStatBlock):
         return SimpleEffect(payload)
 
     def remove_effect(self, name: str, strict: bool = False) -> None:
+        """Remove an effect by name."""
         effect = self.get_effect(name, strict)
         if effect:
             try:
@@ -1759,26 +1842,32 @@ class SimpleGroup(_DirMixin):
 
     @property
     def combatants(self) -> list[SimpleCombatant]:
+        """Members of the group."""
         return [SimpleCombatant(c) for c in self.data.get("combatants", [])]
 
     @property
     def type(self) -> str:
+        """Group type identifier (always 'group')."""
         return str(self.data.get("type", "group"))
 
     @property
     def init(self) -> int:
+        """Initiative score for the group."""
         return _safe_int(self.data.get("init"), 0)
 
     @property
     def name(self) -> str:
+        """Group name."""
         return str(self.data.get("name", "Group"))
 
     @property
     def id(self) -> str | None:
+        """Group id."""
         val = self.data.get("id")
         return str(val) if val is not None else None
 
     def get_combatant(self, name: str, strict: bool | None = None) -> SimpleCombatant | None:
+        """Find a combatant within the group."""
         name_lower = str(name).lower()
         for combatant in self.combatants:
             if strict is True and combatant.name.lower() == name_lower:
@@ -1808,44 +1897,53 @@ class SimpleCombat(_DirMixin):
 
     @property
     def combatants(self) -> list[SimpleCombatant]:
+        """All combatants in the encounter."""
         return [SimpleCombatant(c) for c in self.data.get("combatants", [])]
 
     @property
     def groups(self) -> list[SimpleGroup]:
+        """Combatant groups in the encounter."""
         return [SimpleGroup(g) for g in self.data.get("groups", [])]
 
     @property
     def me(self) -> SimpleCombatant | None:
+        """The player's combatant if present."""
         me_data = self.data.get("me")
         return SimpleCombatant(me_data) if me_data is not None else None
 
     @property
     def current(self) -> SimpleCombatant | SimpleGroup | None:
+        """Current turn holder (combatant or group)."""
         cur = self.data.get("current")
         if cur is None:
             return None
         if cur.get("type") == "group":
             return SimpleGroup(cur)
-        return SimpleCombatant(cur)
+            return SimpleCombatant(cur)
 
     @property
     def name(self) -> str | None:
+        """Name of the combat encounter."""
         val = self.data.get("name")
         return str(val) if val is not None else None
 
     @property
     def round_num(self) -> int:
+        """Current round number."""
         return _safe_int(self.data.get("round_num"), 1)
 
     @property
     def turn_num(self) -> int:
+        """Current turn number within the round."""
         return _safe_int(self.data.get("turn_num"), 1)
 
     @property
     def metadata(self) -> MutableMapping[str, Any]:
+        """Free-form metadata key/value store for the combat."""
         return self.data.setdefault("metadata", {})
 
     def get_combatant(self, name: str, strict: bool | None = None) -> SimpleCombatant | None:
+        """Find a combatant by name (strict, substring, or fuzzy)."""
         name_lower = str(name).lower()
         for combatant in self.combatants:
             if strict is True and combatant.name.lower() == name_lower:
@@ -1861,6 +1959,7 @@ class SimpleCombat(_DirMixin):
         return None
 
     def get_group(self, name: str, strict: bool | None = None) -> SimpleGroup | None:
+        """Find a combatant group by name."""
         name_lower = str(name).lower()
         for group in self.groups:
             if strict is True and group.name.lower() == name_lower:
@@ -1876,6 +1975,7 @@ class SimpleCombat(_DirMixin):
         return None
 
     def set_metadata(self, k: str, v: str) -> None:
+        """Set a metadata key/value pair, enforcing Avrae size limits."""
         key = str(k)
         value = str(v)
         existing = {str(ke): str(va) for ke, va in self.metadata.items() if str(ke) != key}
@@ -1888,12 +1988,15 @@ class SimpleCombat(_DirMixin):
         return self.metadata.get(str(k), default)
 
     def delete_metadata(self, k: str) -> Any:
+        """Delete a metadata key."""
         return self.metadata.pop(str(k), None)
 
     def set_round(self, round_num: int) -> None:
+        """Advance combat to the specified round number."""
         self.data["round_num"] = int(round_num)
 
     def end_round(self) -> None:
+        """Increment round number and reset turn counter."""
         self.data["turn_num"] = 0
         self.data["round_num"] = self.round_num + 1
 

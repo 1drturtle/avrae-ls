@@ -65,7 +65,7 @@ def _run_analysis(path: Path) -> int:
 
     builder = ContextBuilder(config)
     ctx_data = builder.build()
-    executor = MockExecutor()
+    executor = MockExecutor(config.service)
     diagnostics = DiagnosticProvider(executor, config.diagnostics)
 
     source = path.read_text()

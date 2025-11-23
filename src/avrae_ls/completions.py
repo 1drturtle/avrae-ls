@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import ast
+import inspect
 import re
+import typing
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional
 
 from lsprotocol import types
@@ -75,8 +78,9 @@ TYPE_MAP: Dict[str, object] = {
 
 
 IDENT_RE = re.compile(r"[A-Za-z_]\w*$")
-ATTR_RE = re.compile(r"([A-Za-z_][\w\.]*)\.([A-Za-z_]\w*)?\s*$")
-ATTR_AT_CURSOR_RE = re.compile(r"([A-Za-z_][\w\.]*?(?:\(\))?)\.([A-Za-z_]\w*)")
+ATTR_RE = re.compile(r"([A-Za-z_][\w\.\(\)]*)\.(?:([A-Za-z_]\w*)\s*)?$")
+DICT_GET_RE = re.compile(r"^([A-Za-z_]\w*)\.get\(\s*(['\"])(.+?)\2")
+ATTR_AT_CURSOR_RE = re.compile(r"([A-Za-z_][\w\.\(\)]*)\.([A-Za-z_]\w*)")
 
 
 @dataclass
@@ -85,6 +89,25 @@ class Suggestion:
     kind: types.CompletionItemKind
     detail: str = ""
     documentation: str = ""
+
+
+@dataclass
+class AttrMeta:
+    doc: str = ""
+    type_name: str = ""
+    element_type: str = ""
+
+
+@dataclass
+class MethodMeta:
+    signature: str = ""
+    doc: str = ""
+
+
+@dataclass
+class TypeMeta:
+    attrs: Dict[str, AttrMeta]
+    methods: Dict[str, MethodMeta]
 
 
 def gather_suggestions(
@@ -130,15 +153,14 @@ def completion_items_for_position(
     character: int,
     suggestions: Iterable[Suggestion],
 ) -> List[types.CompletionItem]:
-    line_text = _line_text_to_cursor(code, line, character)
-    attr_match = ATTR_RE.search(line_text)
-    if attr_match:
-        receiver = attr_match.group(1)
-        attr_prefix = attr_match.group(2) or ""
+    attr_ctx = _attribute_receiver_and_prefix(code, line, character)
+    if attr_ctx:
+        receiver, attr_prefix = attr_ctx
         sanitized = _sanitize_incomplete_line(code, line, character)
         type_map = _infer_type_map(sanitized)
         return _attribute_completions(receiver, attr_prefix, sanitized, type_map)
 
+    line_text = _line_text_to_cursor(code, line, character)
     prefix = _current_prefix(line_text)
     items: list[types.CompletionItem] = []
     for sugg in suggestions:
@@ -158,10 +180,10 @@ def completion_items_for_position(
 def _attribute_completions(receiver: str, prefix: str, code: str, type_map: Dict[str, str] | None = None) -> List[types.CompletionItem]:
     items: list[types.CompletionItem] = []
     type_key = _resolve_type_name(receiver, code, type_map)
-    attrs, methods = _type_meta(type_key)
+    meta = _type_meta(type_key)
     detail = f"{type_key}()"
 
-    for name in attrs:
+    for name, attr_meta in meta.attrs.items():
         if prefix and not name.startswith(prefix):
             continue
         items.append(
@@ -169,16 +191,19 @@ def _attribute_completions(receiver: str, prefix: str, code: str, type_map: Dict
                 label=name,
                 kind=types.CompletionItemKind.Field,
                 detail=detail,
+                documentation=attr_meta.doc or None,
             )
         )
-    for name in methods:
+    for name, method_meta in meta.methods.items():
         if prefix and not name.startswith(prefix):
             continue
+        method_detail = method_meta.signature or f"{name}()"
         items.append(
             types.CompletionItem(
                 label=name,
                 kind=types.CompletionItemKind.Method,
-                detail=f"{detail} method",
+                detail=method_detail,
+                documentation=method_meta.doc or None,
             )
         )
     return items
@@ -195,29 +220,39 @@ def hover_for_position(
     line_text = _line_text(code, line)
     type_map = _infer_type_map(code)
     bindings = _infer_constant_bindings(code, line, ctx_data)
-    receiver, attr_name = _attribute_at_position(line_text, character)
-    if receiver and attr_name:
+    attr_ctx = _attribute_receiver_and_prefix(code, line, character, capture_full_token=True)
+    if attr_ctx:
+        receiver, attr_prefix = attr_ctx
         inferred = _resolve_type_name(receiver, code, type_map)
-        attrs, methods = _type_meta(inferred)
-        if attr_name in attrs:
-            contents = f"`{inferred}().{attr_name}`"
+        meta = _type_meta(inferred)
+        if attr_prefix in meta.attrs:
+            doc = meta.attrs[attr_prefix].doc
+            contents = f"```avrae\n{inferred}().{attr_prefix}\n```"
+            if doc:
+                contents += f"\n\n{doc}"
             return types.Hover(contents=types.MarkupContent(kind=types.MarkupKind.Markdown, value=contents))
-        if attr_name in methods:
-            contents = f"`{inferred}().{attr_name}()`"
+        if attr_prefix in meta.methods:
+            method_meta = meta.methods[attr_prefix]
+            signature = method_meta.signature or f"{attr_prefix}()"
+            doc = method_meta.doc
+            contents = f"```avrae\n{signature}\n```"
+            if doc:
+                contents += f"\n\n{doc}"
             return types.Hover(contents=types.MarkupContent(kind=types.MarkupKind.Markdown, value=contents))
 
     word, _, _ = _word_at_position(line_text, character)
     if not word:
         return None
+    if word in bindings:
+        return _format_binding_hover(word, bindings[word], "local")
     if word in type_map:
-        contents = f"`{word}` type: `{type_map[word]}()`"
+        type_label = _display_type_label(type_map[word])
+        contents = f"`{word}` type: `{type_label}`"
         return types.Hover(contents=types.MarkupContent(kind=types.MarkupKind.Markdown, value=contents))
     if word in sigs:
         sig = sigs[word]
         contents = f"```avrae\n{sig.label}\n```\n\n{sig.doc}"
         return types.Hover(contents=types.MarkupContent(kind=types.MarkupKind.Markdown, value=contents))
-    if word in bindings:
-        return _format_binding_hover(word, bindings[word], "local")
 
     vars_map = ctx_data.vars.to_initial_names()
     if word in vars_map:
@@ -256,6 +291,49 @@ def _line_text_to_cursor(code: str, line: int, character: int) -> str:
     return lines[line][:character]
 
 
+def _attribute_receiver_and_prefix(code: str, line: int, character: int, capture_full_token: bool = False) -> Optional[tuple[str, str]]:
+    lines = code.splitlines()
+    if line >= len(lines):
+        return None
+    line_text = lines[line]
+    end = character
+    if capture_full_token:
+        while end < len(line_text) and (line_text[end].isalnum() or line_text[end] == "_"):
+            end += 1
+    line_text = line_text[: end]
+    dot = line_text.rfind(".")
+    if dot == -1:
+        return None
+    prefix = line_text[dot + 1 :].strip()
+    placeholder = "__COMPLETE__"
+    new_line = f"{line_text[:dot]}.{placeholder}"
+    mod_lines = list(lines)
+    mod_lines[line] = new_line
+    mod_code = "\n".join(mod_lines)
+    try:
+        tree = ast.parse(mod_code)
+    except SyntaxError:
+        return None
+
+    receiver_src: Optional[str] = None
+
+    class Finder(ast.NodeVisitor):
+        def visit_Attribute(self, node: ast.Attribute):
+            nonlocal receiver_src
+            if isinstance(node.attr, str) and node.attr == placeholder:
+                try:
+                    receiver_src = ast.unparse(node.value)
+                except Exception:
+                    receiver_src = None
+            self.generic_visit(node)
+
+    Finder().visit(tree)
+    if receiver_src is None:
+        return None
+    cleaned = re.sub(r"\[[^\]]*\]", "", receiver_src)
+    return cleaned, prefix
+
+
 def _sanitize_incomplete_line(code: str, line: int, character: int) -> str:
     lines = code.splitlines()
     if 0 <= line < len(lines):
@@ -273,6 +351,12 @@ def _line_text(code: str, line: int) -> str:
     return lines[line]
 
 
+def _display_type_label(type_key: str) -> str:
+    if type_key in TYPE_MAP:
+        return TYPE_MAP[type_key].__name__
+    return type_key
+
+
 def _infer_receiver_type(code: str, name: str) -> Optional[str]:
     return _infer_type_map(code).get(name)
 
@@ -287,16 +371,20 @@ def _infer_type_map(code: str) -> Dict[str, str]:
     class Visitor(ast.NodeVisitor):
         def visit_Assign(self, node: ast.Assign):
             val_type = self._value_type(node.value)
-            if val_type:
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        type_map[target.id] = val_type
+            for target in node.targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                if val_type:
+                    type_map[target.id] = val_type
+                self._record_dict_key_types(target.id, node.value)
             self.generic_visit(node)
 
         def visit_AnnAssign(self, node: ast.AnnAssign):
             val_type = self._value_type(node.value) if node.value else None
-            if val_type and isinstance(node.target, ast.Name):
-                type_map[node.target.id] = val_type
+            if isinstance(node.target, ast.Name):
+                if val_type:
+                    type_map[node.target.id] = val_type
+                self._record_dict_key_types(node.target.id, node.value)
             self.generic_visit(node)
 
         def _value_type(self, value: ast.AST | None) -> Optional[str]:
@@ -322,13 +410,40 @@ def _infer_type_map(code: str) -> Dict[str, str]:
                 return None
             return None
 
+        def _record_dict_key_types(self, var_name: str, value: ast.AST | None) -> None:
+            if not isinstance(value, ast.Dict):
+                return
+            for key_node, val_node in zip(value.keys or [], value.values or []):
+                if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+                    val_type = self._value_type(val_node)
+                    if val_type:
+                        type_map[f"{var_name}.{key_node.value}"] = val_type
+
     Visitor().visit(tree)
     return type_map
 
 
 def _resolve_type_name(receiver: str, code: str, type_map: Dict[str, str] | None = None) -> str:
-    receiver = receiver.rstrip("()")
     mapping = type_map or _infer_type_map(code)
+    get_match = DICT_GET_RE.match(receiver)
+    if get_match:
+        base, _, key = get_match.groups()
+        dict_key = f"{base}.{key}"
+        if dict_key in mapping:
+            return mapping[dict_key]
+    receiver = receiver.rstrip("()")
+    if "." in receiver:
+        base_expr, attr_name = receiver.rsplit(".", 1)
+        base_type = _resolve_type_name(base_expr, code, mapping)
+        if base_type:
+            meta = _type_meta(base_type)
+            attr_meta = meta.attrs.get(attr_name)
+            if attr_meta:
+                if attr_meta.element_type:
+                    return attr_meta.element_type
+                if attr_meta.type_name:
+                    return attr_meta.type_name
+
     if receiver in mapping:
         return mapping[receiver]
     if receiver in TYPE_MAP:
@@ -339,13 +454,139 @@ def _resolve_type_name(receiver: str, code: str, type_map: Dict[str, str] | None
     return receiver
 
 
-def _type_meta(type_name: str) -> tuple[List[str], List[str]]:
-    cls = TYPE_MAP.get(type_name)
-    if cls is None:
-        return [], []
-    attrs = list(getattr(cls, "ATTRS", []))
-    methods = list(getattr(cls, "METHODS", []))
-    return sorted(set(attrs)), sorted(set(methods))
+def _type_meta(type_name: str) -> TypeMeta:
+    return _type_meta_map().get(type_name, TypeMeta(attrs={}, methods={}))
+
+
+@lru_cache()
+def _type_meta_map() -> Dict[str, TypeMeta]:
+    meta: dict[str, TypeMeta] = {}
+    reverse_type_map: dict[type, str] = {}
+    for key, cls in TYPE_MAP.items():
+        reverse_type_map[cls] = key
+
+    def _iter_element_for_type_name(type_name: str) -> str:
+        cls = TYPE_MAP.get(type_name)
+        if not cls:
+            return ""
+        return _element_type_from_iterable(cls, reverse_type_map)
+
+    for type_name, cls in TYPE_MAP.items():
+        attrs: dict[str, AttrMeta] = {}
+        methods: dict[str, MethodMeta] = {}
+
+        for attr in getattr(cls, "ATTRS", []):
+            doc = ""
+            type_name_hint = ""
+            element_type_hint = ""
+            try:
+                attr_obj = getattr(cls, attr)
+            except Exception:
+                attr_obj = None
+            if isinstance(attr_obj, property) and attr_obj.fget:
+                doc = (attr_obj.fget.__doc__ or "").strip()
+                ann = _return_annotation(attr_obj.fget, cls)
+                type_name_hint, element_type_hint = _type_names_from_annotation(ann, reverse_type_map)
+            elif attr_obj is not None:
+                doc = (getattr(attr_obj, "__doc__", "") or "").strip()
+            if not type_name_hint and not element_type_hint:
+                ann = _class_annotation(cls, attr)
+                type_name_hint, element_type_hint = _type_names_from_annotation(ann, reverse_type_map)
+            if type_name_hint and not element_type_hint:
+                element_type_hint = _iter_element_for_type_name(type_name_hint)
+            attrs[attr] = AttrMeta(doc=doc, type_name=type_name_hint, element_type=element_type_hint)
+
+        for meth in getattr(cls, "METHODS", []):
+            doc = ""
+            sig_label = ""
+            try:
+                meth_obj = getattr(cls, meth)
+            except Exception:
+                meth_obj = None
+            if callable(meth_obj):
+                sig_label = _format_method_signature(meth, meth_obj)
+                doc = (meth_obj.__doc__ or "").strip()
+            methods[meth] = MethodMeta(signature=sig_label, doc=doc)
+
+        meta[type_name] = TypeMeta(attrs=attrs, methods=methods)
+    return meta
+
+
+def _format_method_signature(name: str, obj: Any) -> str:
+    try:
+        sig = inspect.signature(obj)
+    except (TypeError, ValueError):
+        return f"{name}()"
+    params = list(sig.parameters.values())
+    if params and params[0].name in {"self", "cls"}:
+        params = params[1:]
+    sig = sig.replace(parameters=params)
+    return f"{name}{sig}"
+
+
+def _return_annotation(func: Any, cls: type) -> Any:
+    try:
+        module = inspect.getmodule(func) or inspect.getmodule(cls)
+        globalns = module.__dict__ if module else None
+        hints = typing.get_type_hints(func, globalns=globalns, include_extras=False)
+        return hints.get("return")
+    except Exception:
+        return getattr(func, "__annotations__", {}).get("return")
+
+
+def _class_annotation(cls: type, attr: str) -> Any:
+    try:
+        module = inspect.getmodule(cls)
+        globalns = module.__dict__ if module else None
+        hints = typing.get_type_hints(cls, globalns=globalns, include_extras=False)
+        if attr in hints:
+            return hints[attr]
+    except Exception:
+        pass
+    return getattr(getattr(cls, "__annotations__", {}), "get", lambda _k: None)(attr)
+
+
+def _type_names_from_annotation(ann: Any, reverse_type_map: Dict[type, str]) -> tuple[str, str]:
+    if ann is None:
+        return "", ""
+    if isinstance(ann, str):
+        return "", ""
+    try:
+        origin = getattr(ann, "__origin__", None)
+    except Exception:
+        origin = None
+    args = getattr(ann, "__args__", ()) if origin else ()
+
+    if ann in reverse_type_map:
+        return reverse_type_map[ann], ""
+
+    # handle list/sequence typing to detect element type
+    iterable_origins = {list, List, Iterable, typing.Sequence, typing.Iterable}
+    try:
+        from collections.abc import Iterable as ABCIterable, Sequence as ABCSequence
+        iterable_origins.update({ABCIterable, ABCSequence})
+    except Exception:
+        pass
+    if origin in iterable_origins:
+        if args:
+            elem = args[0]
+            elem_name, _ = _type_names_from_annotation(elem, reverse_type_map)
+            return "", elem_name
+        return "", ""
+
+    if isinstance(ann, type) and ann in reverse_type_map:
+        return reverse_type_map[ann], ""
+    return "", ""
+
+
+def _element_type_from_iterable(cls: type, reverse_type_map: Dict[type, str]) -> str:
+    try:
+        hints = typing.get_type_hints(cls.__iter__, globalns=inspect.getmodule(cls).__dict__, include_extras=False)
+        ret_ann = hints.get("return")
+        _, elem = _type_names_from_annotation(ret_ann, reverse_type_map)
+        return elem
+    except Exception:
+        return ""
 
 
 def _attribute_at_position(line_text: str, cursor: int) -> tuple[Optional[str], Optional[str]]:
@@ -550,10 +791,31 @@ def _is_safe_call(base: Any, method: str) -> bool:
 
 
 def _format_binding_hover(name: str, value: Any, label: str) -> types.Hover:
-    type_name = type(value).__name__
+    type_name = _describe_type(value)
     preview = _preview_value(value)
     contents = f"**{label}** `{name}`\n\nType: `{type_name}`\nValue: `{preview}`"
     return types.Hover(contents=types.MarkupContent(kind=types.MarkupKind.Markdown, value=contents))
+
+
+def _describe_type(value: Any) -> str:
+    # Provide light element-type hints for common iterables so hover shows list[Foo].
+    def _iterable_type(iterable: Iterable[Any], container: str) -> str:
+        try:
+            seen = {type(item).__name__ for item in iterable if item is not None}
+        except Exception:
+            return container
+        return f"{container}[{seen.pop()}]" if len(seen) == 1 else container
+
+    try:
+        if isinstance(value, list):
+            return _iterable_type(value, "list")
+        if isinstance(value, tuple):
+            return _iterable_type(value, "tuple")
+        if isinstance(value, set):
+            return _iterable_type(value, "set")
+    except Exception:
+        pass
+    return type(value).__name__
 
 
 def _preview_value(value: Any) -> str:

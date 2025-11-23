@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 from avrae_ls.config import VarSources
@@ -287,8 +288,8 @@ async def test_uvar_helpers_available(tmp_path):
     assert result.error is None
     uvars = result.value
     assert uvars["foo"] == "orig"
-    assert uvars["bar"] == 2
-    assert uvars["baz"] == 3
+    assert uvars["bar"] == "2"
+    assert uvars["baz"] == "3"
 
 
 @pytest.mark.asyncio
@@ -299,6 +300,27 @@ async def test_set_cvar_binds_runtime_name(tmp_path):
     result = await executor.run("c = character(); c.set_cvar('pet', 'hawk'); pet", ctx, resolver)
     assert result.error is None
     assert result.value == "hawk"
+
+
+@pytest.mark.asyncio
+async def test_cvar_uvar_helpers_return_strings(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx_with_character({"name": "Aelar", "cvars": {"foo": 1}})
+    resolver = _resolver(tmp_path)
+    code = "\n".join(
+        [
+            "c = character()",
+            "c.set_cvar('num', 5)",
+            "c.get_cvar('num')",
+            "set_uvar('test', 9)",
+            "get_uvar('test')",
+        ]
+    )
+    result = await executor.run(code, ctx, resolver)
+    assert result.error is None
+    assert result.value == "9"
+    # ensure cvar stored as string
+    assert ctx.character["cvars"]["num"] == "5"
 
 
 @pytest.mark.asyncio
@@ -325,6 +347,71 @@ async def test_reference_helpers_available(tmp_path):
     result = await executor.run(code, ctx, resolver)
     assert result.error is None
     assert result.value == "module-value"
+
+
+@pytest.mark.asyncio
+async def test_get_resolution_order(tmp_path):
+    executor = MockExecutor()
+    resolver = _resolver(tmp_path)
+
+    ctx = ContextData(vars=VarSources(cvars={"foo": "cvar"}, uvars={"foo": "uvar"}))
+    result = await executor.run("foo = 'local'\nget('foo')", ctx, resolver)
+    assert result.error is None
+    assert result.value == "local"
+
+    result = await executor.run("get('foo')", ctx, resolver)
+    assert result.error is None
+    assert result.value == "cvar"
+
+    ctx_uvar = ContextData(vars=VarSources(uvars={"bar": "uvar"}))
+    result = await executor.run("get('bar')", ctx_uvar, resolver)
+    assert result.error is None
+    assert result.value == "uvar"
+
+    ctx_svar = ContextData(vars=VarSources(svars={"baz": "svar"}))
+    result = await executor.run("get('baz', 'missing')", ctx_svar, resolver)
+    assert result.error is None
+    assert result.value == "missing"
+
+
+@pytest.mark.asyncio
+async def test_verify_signature_cached(monkeypatch, tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    calls: list[str] = []
+
+    def _fake_post(url, json=None, headers=None, timeout=None):
+        calls.append(json.get("signature") if isinstance(json, dict) else None)
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": {
+                    "message_id": 1,
+                    "channel_id": 2,
+                    "author_id": 3,
+                    "timestamp": 0.0,
+                    "scope": "UNKNOWN",
+                    "user_data": len(calls),
+                    "workshop_collection_id": None,
+                },
+            },
+        )
+
+    monkeypatch.setattr("avrae_ls.runtime.httpx.post", _fake_post)
+
+    result = await executor.run("verify_signature('sig1')\nverify_signature('sig1')", ctx, resolver)
+    assert result.error is None
+    assert len(calls) == 1
+    assert result.value["user_data"] == 1
+
+    calls.clear()
+    result = await executor.run("verify_signature('sig1')\nverify_signature('sig2')", ctx, resolver)
+    assert result.error is None
+    assert calls == ["sig1", "sig2"]
+    assert result.value["user_data"] == 2
 
 
 def test_documented_builtins_present():

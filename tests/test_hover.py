@@ -6,6 +6,7 @@ from avrae_ls.api import CharacterAPI
 from avrae_ls.completions import hover_for_position
 from avrae_ls.config import AvraeLSConfig, VarSources
 from avrae_ls.context import ContextData, ContextBuilder, GVarResolver
+from avrae_ls.signature_help import load_signatures
 
 
 def _ctx_with_vars() -> tuple[ContextData, GVarResolver]:
@@ -42,6 +43,18 @@ def test_hover_handles_attribute_inside_call():
     hover = hover_for_position(code, 0, code.index("attacks") + 2, {}, ctx_data, resolver)
     assert hover is not None
     assert "character().attacks" in hover.contents.value
+
+
+def test_hover_shows_function_signature_and_doc():
+    ctx_data = ContextData()
+    resolver = GVarResolver(AvraeLSConfig.default(Path(".")))
+    sigs = load_signatures()
+    code = "get('foo')\n"
+    hover = hover_for_position(code, 0, code.index("get") + 1, sigs, ctx_data, resolver)
+    assert hover is not None
+    text = hover.contents.value
+    assert "get(name" in text
+    assert "local > cvar > uvar" in text
 
 
 def test_hover_resolves_attribute_binding_value():
@@ -84,6 +97,30 @@ def test_hover_resolves_method_call_on_binding():
     assert "z" in text
     assert "int" in text
     assert "3" in text
+
+
+def test_hover_prefers_binding_type_over_type_map():
+    config = AvraeLSConfig.default(Path("."))
+    builder = ContextBuilder(config)
+    ctx_data = builder.build()
+    resolver = builder.gvar_resolver
+    code = "x = character().attacks\n"
+    hover = hover_for_position(code, 0, 0, {}, ctx_data, resolver)
+    assert hover is not None
+    text = hover.contents.value
+    assert "AliasAttackList" in text
+
+
+def test_hover_shows_element_type_for_list_bindings():
+    config = AvraeLSConfig.default(Path("."))
+    builder = ContextBuilder(config)
+    ctx_data = builder.build()
+    resolver = builder.gvar_resolver
+    code = "x = character().actions\n"
+    hover = hover_for_position(code, 0, 0, {}, ctx_data, resolver)
+    assert hover is not None
+    text = hover.contents.value
+    assert "list[AliasAction]" in text
 
 
 def test_hover_does_not_call_unsafe_methods(monkeypatch: pytest.MonkeyPatch):
