@@ -95,6 +95,93 @@ def test_character_attacks_attribute_completions():
     assert "raw" in labels
 
 
+def test_character_attacks_attribute_completions_with_binding():
+    code = "\n".join(
+        [
+            "x = character().attacks",
+            "y = x[0].",
+        ]
+    )
+    items = completion_items_for_position(code, line=1, character=len("y = x[0]."), suggestions=[])
+    labels = {item.label for item in items}
+    assert "name" in labels
+    assert "verb" in labels
+    assert "raw" in labels
+
+
+def test_builtin_list_completions():
+    code = "arr = []\narr."
+    items = completion_items_for_position(code, line=1, character=len("arr."), suggestions=[])
+    labels = {item.label for item in items}
+    assert "append" in labels
+    assert "pop" in labels
+
+
+def test_builtin_dict_completions():
+    code = "data = {'a': 1}\ndata."
+    items = completion_items_for_position(code, line=1, character=len("data."), suggestions=[])
+    labels = {item.label for item in items}
+    assert "keys" in labels
+    assert "items" in labels
+    assert "get" in labels
+
+
+def test_builtin_str_completions():
+    code = "name = 'test'\nname."
+    items = completion_items_for_position(code, line=1, character=len("name."), suggestions=[])
+    labels = {item.label for item in items}
+    assert "lower" in labels
+    assert "split" in labels
+
+
+def test_attribute_completion_inside_call_does_not_use_builtin_suggestions():
+    cfg = AvraeLSConfig.default(Path("."))
+    ctx_data = ContextData()
+    resolver = GVarResolver(cfg)
+    sigs = load_signatures()
+    suggestions = gather_suggestions(ctx_data, resolver, sigs)
+
+    code_no_index = "\n".join(
+        [
+            "x = []",
+            "y = character().actions",
+            "x.append(y.)",
+        ]
+    )
+    items = completion_items_for_position(code_no_index, line=2, character=len("x.append(y."), suggestions=suggestions)
+    labels = {item.label for item in items}
+    assert "append" in labels  # list methods should surface
+    assert "name" not in labels  # element attrs should not surface until indexed
+    assert "abs" not in labels
+
+    # When indexed, element attributes should surface (and still no builtins)
+    code_indexed = "\n".join(
+        [
+            "x = []",
+            "y = character().actions",
+            "x.append(y[0].)",
+        ]
+    )
+    items_idx = completion_items_for_position(code_indexed, line=2, character=len("x.append(y[0]."), suggestions=suggestions)
+    labels_idx = {item.label for item in items_idx}
+    assert "name" in labels_idx
+    assert "abs" not in labels_idx
+
+
+def test_loop_iteration_completions_use_element_type():
+    code = "\n".join(
+        [
+            "x = character().attacks",
+            "for i in x:",
+            "    i.",
+        ]
+    )
+    items = completion_items_for_position(code, line=2, character=len("    i."), suggestions=[])
+    labels = {item.label for item in items}
+    assert "name" in labels
+    assert "verb" in labels
+
+
 def test_character_actions_attribute_completions():
     code = "character().actions[0]."
     items = completion_items_for_position(code, line=0, character=len(code), suggestions=[])

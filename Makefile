@@ -8,13 +8,16 @@ PY_SOURCES = src tests
 
 install:
 	$(UV) sync --all-extras
-	$(UV) tool install .
+	$(UV) tool install --force --no-binary --no-cache --from . avrae-ls
 
 lint:
 	$(UV) run ruff check $(PY_SOURCES)
 
 test:
 	$(UV) run pytest tests --cov=src
+
+bump-version:
+	$(UV) run scripts/bump_version.py
 
 check: lint test
 

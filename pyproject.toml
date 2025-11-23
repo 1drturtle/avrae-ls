@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "avrae-ls"
-version = "0.3.0"
+version = "0.3.1"
 description = "Language server for Avrae draconic aliases"
 authors = [
   { name = "1drturtle" }

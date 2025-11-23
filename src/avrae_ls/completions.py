@@ -6,7 +6,7 @@ import re
 import typing
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, ClassVar, Dict, Iterable, List, Optional
 
 from lsprotocol import types
 
@@ -42,6 +42,76 @@ from .api import (
 )
 from .signature_help import FunctionSig
 
+
+class _BuiltinList:
+    ATTRS: ClassVar[list[str]] = []
+    METHODS: ClassVar[list[str]] = ["append", "extend", "insert", "remove", "pop", "clear", "index", "count", "sort", "reverse", "copy"]
+
+    def __iter__(self) -> Iterable[Any]:
+        return iter([])
+
+    def append(self, value: Any) -> None: ...
+    def extend(self, iterable: Iterable[Any]) -> None: ...
+    def insert(self, index: int, value: Any) -> None: ...
+    def remove(self, value: Any) -> None: ...
+    def pop(self, index: int = -1) -> Any: ...
+    def clear(self) -> None: ...
+    def index(self, value: Any, start: int = 0, stop: int | None = None) -> int: ...
+    def count(self, value: Any) -> int: ...
+    def sort(self, *, key=None, reverse: bool = False) -> None: ...
+    def reverse(self) -> None: ...
+    def copy(self) -> list[Any]: ...
+
+
+class _BuiltinDict:
+    ATTRS: ClassVar[list[str]] = []
+    METHODS: ClassVar[list[str]] = ["get", "keys", "values", "items", "pop", "popitem", "update", "setdefault", "clear", "copy"]
+
+    def __iter__(self) -> Iterable[Any]:
+        return iter({})
+
+    def get(self, key: Any, default: Any = None) -> Any: ...
+    def keys(self) -> Any: ...
+    def values(self) -> Any: ...
+    def items(self) -> Any: ...
+    def pop(self, key: Any, default: Any = None) -> Any: ...
+    def popitem(self) -> tuple[Any, Any]: ...
+    def update(self, *args, **kwargs) -> None: ...
+    def setdefault(self, key: Any, default: Any = None) -> Any: ...
+    def clear(self) -> None: ...
+    def copy(self) -> dict[Any, Any]: ...
+
+
+class _BuiltinStr:
+    ATTRS: ClassVar[list[str]] = []
+    METHODS: ClassVar[list[str]] = [
+        "lower",
+        "upper",
+        "title",
+        "split",
+        "join",
+        "replace",
+        "strip",
+        "startswith",
+        "endswith",
+        "format",
+    ]
+
+    def __iter__(self) -> Iterable[str]:
+        return iter("")
+
+    def lower(self) -> str: ...
+    def upper(self) -> str: ...
+    def title(self) -> str: ...
+    def split(self, sep: str | None = None, maxsplit: int = -1) -> list[str]: ...
+    def join(self, iterable: Iterable[str]) -> str: ...
+    def replace(self, old: str, new: str, count: int = -1) -> str: ...
+    def strip(self, chars: str | None = None) -> str: ...
+    def startswith(self, prefix, start: int = 0, end: int | None = None) -> bool: ...
+    def endswith(self, suffix, start: int = 0, end: int | None = None) -> bool: ...
+    def format(self, *args, **kwargs) -> str: ...
+
+
 TYPE_MAP: Dict[str, object] = {
     "character": CharacterAPI,
     "combat": SimpleCombat,
@@ -74,6 +144,9 @@ TYPE_MAP: Dict[str, object] = {
     "SimpleGroup": SimpleGroup,
     "effect": SimpleEffect,
     "SimpleEffect": SimpleEffect,
+    "list": _BuiltinList,
+    "dict": _BuiltinDict,
+    "str": _BuiltinStr,
 }
 
 
@@ -108,6 +181,7 @@ class MethodMeta:
 class TypeMeta:
     attrs: Dict[str, AttrMeta]
     methods: Dict[str, MethodMeta]
+    element_type: str = ""
 
 
 def gather_suggestions(
@@ -304,9 +378,16 @@ def _attribute_receiver_and_prefix(code: str, line: int, character: int, capture
     dot = line_text.rfind(".")
     if dot == -1:
         return None
-    prefix = line_text[dot + 1 :].strip()
+    tail = line_text[dot + 1 :]
+    prefix_match = re.match(r"\s*([A-Za-z_]\w*)?", tail)
+    prefix = prefix_match.group(1) or "" if prefix_match else ""
+    suffix = tail[prefix_match.end() if prefix_match else 0 :]
     placeholder = "__COMPLETE__"
-    new_line = f"{line_text[:dot]}.{placeholder}"
+    new_line = f"{line_text[:dot]}.{placeholder}{suffix}"
+    # Close unmatched parentheses so the temporary code parses.
+    paren_balance = new_line.count("(") - new_line.count(")")
+    if paren_balance > 0:
+        new_line = new_line + (")" * paren_balance)
     mod_lines = list(lines)
     mod_lines[line] = new_line
     mod_code = "\n".join(mod_lines)
@@ -330,17 +411,29 @@ def _attribute_receiver_and_prefix(code: str, line: int, character: int, capture
     Finder().visit(tree)
     if receiver_src is None:
         return None
-    cleaned = re.sub(r"\[[^\]]*\]", "", receiver_src)
-    return cleaned, prefix
+    return receiver_src, prefix
 
 
 def _sanitize_incomplete_line(code: str, line: int, character: int) -> str:
     lines = code.splitlines()
     if 0 <= line < len(lines):
-        prefix = lines[line][:character].rstrip()
-        if prefix.endswith("."):
-            prefix = prefix[:-1]
+        prefix = lines[line][:character]
+        trimmed = prefix.rstrip()
+        if trimmed.endswith("."):
+            prefix = trimmed[:-1]
+        else:
+            dot = prefix.rfind(".")
+            if dot != -1:
+                after = prefix[dot + 1 :]
+                if not re.match(r"\s*[A-Za-z_]", after):
+                    prefix = prefix[:dot] + after
         lines[line] = prefix
+        candidate = "\n".join(lines)
+        try:
+            ast.parse(candidate)
+        except SyntaxError:
+            indent = re.match(r"[ \t]*", lines[line]).group(0)
+            lines[line] = indent + "pass"
     return "\n".join(lines)
 
 
@@ -370,54 +463,89 @@ def _infer_type_map(code: str) -> Dict[str, str]:
 
     class Visitor(ast.NodeVisitor):
         def visit_Assign(self, node: ast.Assign):
-            val_type = self._value_type(node.value)
+            val_type, elem_type = self._value_type(node.value)
             for target in node.targets:
                 if not isinstance(target, ast.Name):
                     continue
                 if val_type:
                     type_map[target.id] = val_type
+                if elem_type:
+                    type_map[f"{target.id}.__element__"] = elem_type
                 self._record_dict_key_types(target.id, node.value)
             self.generic_visit(node)
 
+        def visit_For(self, node: ast.For):
+            iter_type, elem_type = self._value_type(node.iter)
+            if not elem_type and isinstance(node.iter, ast.Name):
+                elem_type = type_map.get(f"{node.iter.id}.__element__")
+            if elem_type and isinstance(node.target, ast.Name):
+                type_map[node.target.id] = elem_type
+            self.generic_visit(node)
+
         def visit_AnnAssign(self, node: ast.AnnAssign):
-            val_type = self._value_type(node.value) if node.value else None
+            val_type, elem_type = self._value_type(node.value) if node.value else (None, None)
             if isinstance(node.target, ast.Name):
                 if val_type:
                     type_map[node.target.id] = val_type
+                if elem_type:
+                    type_map[f"{node.target.id}.__element__"] = elem_type
                 self._record_dict_key_types(node.target.id, node.value)
             self.generic_visit(node)
 
-        def _value_type(self, value: ast.AST | None) -> Optional[str]:
+        def _value_type(self, value: ast.AST | None) -> tuple[Optional[str], Optional[str]]:
             if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
                 if value.func.id in {"character", "combat"}:
-                    return value.func.id
+                    return value.func.id, None
                 if value.func.id == "vroll":
-                    return "SimpleRollResult"
+                    return "SimpleRollResult", None
+                if value.func.id in {"list", "dict", "str"}:
+                    return value.func.id, None
+            if isinstance(value, ast.List):
+                return "list", None
+            if isinstance(value, ast.Dict):
+                return "dict", None
+            if isinstance(value, ast.Constant):
+                if isinstance(value.value, str):
+                    return "str", None
             if isinstance(value, ast.Name):
                 if value.id in type_map:
-                    return type_map[value.id]
+                    return type_map[value.id], type_map.get(f"{value.id}.__element__")
                 if value.id in {"character", "combat", "ctx"}:
-                    return value.id
+                    return value.id, None
             if isinstance(value, ast.Attribute):
                 attr_name = value.attr
                 base_type = None
+                base_elem = None
                 if isinstance(value.value, ast.Name):
                     base_type = type_map.get(value.value.id)
+                    base_elem = type_map.get(f"{value.value.id}.__element__")
                 if base_type is None:
-                    base_type = self._value_type(value.value)
-                if base_type and attr_name in TYPE_MAP:
-                    return attr_name
-                return None
-            return None
+                    base_type, base_elem = self._value_type(value.value)
+                if base_type:
+                    meta = _type_meta(base_type)
+                    attr_meta = meta.attrs.get(attr_name)
+                    if attr_meta:
+                        if attr_meta.type_name:
+                            return attr_meta.type_name, attr_meta.element_type or None
+                        if attr_meta.element_type:
+                            return base_type, attr_meta.element_type
+                    if base_elem:
+                        return base_elem, None
+                    if attr_name in TYPE_MAP:
+                        return attr_name, None
+                return None, None
+            return None, None
 
         def _record_dict_key_types(self, var_name: str, value: ast.AST | None) -> None:
             if not isinstance(value, ast.Dict):
                 return
             for key_node, val_node in zip(value.keys or [], value.values or []):
                 if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
-                    val_type = self._value_type(val_node)
+                    val_type, elem_type = self._value_type(val_node)
                     if val_type:
                         type_map[f"{var_name}.{key_node.value}"] = val_type
+                    if elem_type:
+                        type_map[f"{var_name}.{key_node.value}.__element__"] = elem_type
 
     Visitor().visit(tree)
     return type_map
@@ -431,13 +559,26 @@ def _resolve_type_name(receiver: str, code: str, type_map: Dict[str, str] | None
         dict_key = f"{base}.{key}"
         if dict_key in mapping:
             return mapping[dict_key]
+    bracket = receiver.rfind("[")
+    if bracket != -1 and receiver.endswith("]"):
+        base_expr = receiver[:bracket]
+        elem_hint = mapping.get(f"{base_expr}.__element__")
+        if elem_hint:
+            return elem_hint
+        base_type = _resolve_type_name(base_expr, code, mapping)
+        if base_type:
+            base_meta = _type_meta(base_type)
+            if base_meta.element_type:
+                return base_meta.element_type
+            return base_type
     receiver = receiver.rstrip("()")
     if "." in receiver:
         base_expr, attr_name = receiver.rsplit(".", 1)
         base_type = _resolve_type_name(base_expr, code, mapping)
         if base_type:
             meta = _type_meta(base_type)
-            attr_meta = meta.attrs.get(attr_name)
+            attr_key = attr_name.split("[", 1)[0]
+            attr_meta = meta.attrs.get(attr_key)
             if attr_meta:
                 if attr_meta.element_type:
                     return attr_meta.element_type
@@ -446,16 +587,19 @@ def _resolve_type_name(receiver: str, code: str, type_map: Dict[str, str] | None
 
     if receiver in mapping:
         return mapping[receiver]
+    elem_key = f"{receiver}.__element__"
+    if elem_key in mapping:
+        return mapping[elem_key]
     if receiver in TYPE_MAP:
         return receiver
-    tail = receiver.split(".")[-1]
+    tail = receiver.split(".")[-1].split("[", 1)[0]
     if tail in TYPE_MAP:
         return tail
     return receiver
 
 
 def _type_meta(type_name: str) -> TypeMeta:
-    return _type_meta_map().get(type_name, TypeMeta(attrs={}, methods={}))
+    return _type_meta_map().get(type_name, TypeMeta(attrs={}, methods={}, element_type=""))
 
 
 @lru_cache()
@@ -474,6 +618,7 @@ def _type_meta_map() -> Dict[str, TypeMeta]:
     for type_name, cls in TYPE_MAP.items():
         attrs: dict[str, AttrMeta] = {}
         methods: dict[str, MethodMeta] = {}
+        iterable_element = _iter_element_for_type_name(type_name)
 
         for attr in getattr(cls, "ATTRS", []):
             doc = ""
@@ -508,7 +653,7 @@ def _type_meta_map() -> Dict[str, TypeMeta]:
                 doc = (meth_obj.__doc__ or "").strip()
             methods[meth] = MethodMeta(signature=sig_label, doc=doc)
 
-        meta[type_name] = TypeMeta(attrs=attrs, methods=methods)
+        meta[type_name] = TypeMeta(attrs=attrs, methods=methods, element_type=iterable_element)
     return meta
 
 
@@ -571,8 +716,9 @@ def _type_names_from_annotation(ann: Any, reverse_type_map: Dict[type, str]) -> 
         if args:
             elem = args[0]
             elem_name, _ = _type_names_from_annotation(elem, reverse_type_map)
-            return "", elem_name
-        return "", ""
+            container_name = reverse_type_map.get(origin) or "list"
+            return container_name, elem_name
+        return reverse_type_map.get(origin) or "list", ""
 
     if isinstance(ann, type) and ann in reverse_type_map:
         return reverse_type_map[ann], ""
