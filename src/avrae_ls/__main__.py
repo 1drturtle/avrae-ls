@@ -13,7 +13,7 @@ from .config import CONFIG_FILENAME, load_config
 from .context import ContextBuilder
 from .diagnostics import DiagnosticProvider
 from .runtime import MockExecutor
-from .server import create_server
+from .server import create_server, __version__
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -24,9 +24,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--stdio", action="store_true", help="Accept stdio flag for VS Code clients (ignored)")
     parser.add_argument("--log-level", default="WARNING", help="Logging level (DEBUG, INFO, WARNING, ERROR)")
     parser.add_argument("--analyze", metavar="FILE", help="Run diagnostics for a file and print them to stdout")
+    parser.add_argument("--version", action="store_true", help="Print version and exit")
     args = parser.parse_args(argv)
 
     _configure_logging(args.log_level)
+
+    if args.version:
+        print(__version__)
+        return
 
     if args.analyze:
         if args.tcp:

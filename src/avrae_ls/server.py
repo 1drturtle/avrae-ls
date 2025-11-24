@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict
+from importlib import metadata
 
 import draconic
 from lsprotocol import types
@@ -22,7 +23,11 @@ from .code_actions import code_actions_for_document
 from .symbols import build_symbol_table, document_symbols, find_definition_range, find_references, range_for_word
 from .argument_parsing import apply_argument_parsing
 
-__version__ = "0.1.0"
+# Prefer package metadata so the server version matches the installed wheel.
+try:
+    __version__ = metadata.version("avrae-ls")
+except metadata.PackageNotFoundError:
+    __version__ = "0.0.0+unknown"
 log = logging.getLogger(__name__)
 
 RUN_ALIAS_COMMAND = "avrae.runAlias"
