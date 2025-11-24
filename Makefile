@@ -3,8 +3,10 @@ NPM ?= npm
 VSCE ?= npx vsce
 
 PY_SOURCES = src tests
+BUMP ?= $(firstword $(filter patch minor major,$(MAKECMDGOALS)))
+BUMP ?= patch
 
-.PHONY: install lint test check wheel build install-wheel vscode-deps vsix package clean release
+.PHONY: install lint test check wheel build install-wheel vscode-deps vsix package clean release patch minor major
 
 install:
 	$(UV) sync --all-extras
@@ -17,7 +19,12 @@ test:
 	$(UV) run pytest tests --cov=src
 
 bump-version:
-	$(UV) run scripts/bump_version.py
+	$(UV) run scripts/bump_version.py $(BUMP)
+	$(UV) lock
+
+# swallow positional bump targets so `make bump-version minor` works
+patch minor major:
+	@:
 
 check: lint test
 
