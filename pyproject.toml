@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "avrae-ls"
-version = "0.4.1"
+version = "0.5.0"
 description = "Language server for Avrae draconic aliases"
 authors = [
   { name = "1drturtle" }
