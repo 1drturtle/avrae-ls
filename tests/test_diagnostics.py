@@ -3,6 +3,7 @@ import pytest
 from avrae_ls.config import AvraeLSConfig, DiagnosticSettings, VarSources
 from avrae_ls.context import ContextData, GVarResolver
 from avrae_ls.diagnostics import DiagnosticProvider
+from avrae_ls.alias_preview import render_alias_command
 from avrae_ls.runtime import MockExecutor
 
 
@@ -26,26 +27,6 @@ async def test_reports_syntax_error(tmp_path):
     diags = await provider.analyze("if True print('hi')", ctx_data, resolver)
     assert diags
     assert any(d.severity.value == 1 for d in diags)  # DiagnosticSeverity.Error
-
-
-@pytest.mark.asyncio
-async def test_reports_unknown_name(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    diags = await provider.analyze("x + 1", ctx_data, resolver)
-    assert any("undefined" in d.message for d in diags)
-
-
-@pytest.mark.asyncio
-async def test_reports_unknown_gvar(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    diags = await provider.analyze("get_gvar('abc')", ctx_data, resolver)
-    assert any("gvar" in d.message for d in diags)
 
 
 @pytest.mark.asyncio
@@ -73,48 +54,48 @@ async def test_fetches_gvar_when_enabled(tmp_path):
     assert resolver.get_local("abc123") == "fetched-abc123"
 
 
+@pytest.mark.parametrize(
+    "alias_text, expected_command, expected_messages, resolver_seed, ctx_kwargs",
+    [
+        pytest.param("echo <drac2></drac2>", "echo ", [], None, None, id="empty_inline_block"),
+        pytest.param('!alias echo <drac2> return "s"\n</drac2>', "s", [], None, None, id="inline_return_alias"),
+        pytest.param("!alias inline echo prefix <drac2>bad_var</drac2> suffix", None, ["undefined"], None, None, id="inline_bad_var"),
+        pytest.param("using(mod='mod')\nmod.answer", None, [], {"mod": "answer = 'ok'"}, None, id="using_imported_name"),
+        pytest.param("for x in range(3):\n    y = x\nprint(x)", None, [], None, None, id="for_loop_binds_target"),
+        pytest.param("!alias aaa echo \n<drac2>\nfor i in range(3):\n  return i\n\n</drac2>", "echo \n0", [], None, None, id="drac_loop_return"),
+        pytest.param("!alias hello echo\n<drac2>\nx = 3\nreturn x\n</drac2>", "echo\n3", [], None, None, id="drac_simple_return"),
+        pytest.param("len(1, 2)", None, ["invalid arguments"], None, None, id="bad_args"),
+        pytest.param("import os\nx=1", None, ["Imports are not supported"], None, None, id="imports_not_supported"),
+        pytest.param("x + 1", None, ["undefined"], None, None, id="unknown_name"),
+        pytest.param("get_gvar('abc')", None, ["gvar"], None, None, id="unknown_gvar"),
+        pytest.param("class X:\n    def _hidden(self):\n        return 1\n\nX()._hidden()", None, ["private methods"], None, None, id="private_method_call"),
+        pytest.param("x = roll('1d1')\ny = vroll('1d1')\nx + y.total", None, [], None, None, id="roll_and_vroll_available"),
+        pytest.param("character().hp", None, ["character context"], None, None, id="character_context_missing"),
+        pytest.param("combat().round_num", None, ["combat context"], None, None, id="combat_context_missing"),
+        pytest.param("character.hp", None, ["Call character()"], None, None, id="character_not_called"),
+        pytest.param("combat().combatants.hp", None, ["index or iterate"], None, {"combat": {"combatants": []}}, id="iterable_attribute_chain"),
+        pytest.param("ctx.author()", None, ["property"], None, None, id="calling_property"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_using_marks_imported_name_defined(tmp_path):
+async def test_diagnostic_matrix(tmp_path, alias_text: str, expected_command, expected_messages, resolver_seed, ctx_kwargs):
     provider = _provider()
     resolver = _resolver(tmp_path)
-    resolver.reset({"mod": "answer = 'ok'"})
-    ctx_data = ContextData(vars=VarSources())
+    if resolver_seed:
+        resolver.reset(resolver_seed)
+    ctx_kwargs = ctx_kwargs or {}
+    ctx_data = ContextData(vars=VarSources(), **ctx_kwargs)
 
-    diags = await provider.analyze("using(mod='mod')\nmod.answer", ctx_data, resolver)
-    assert diags == []
-
-
-@pytest.mark.asyncio
-async def test_for_loop_binds_target(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    code = "for x in range(3):\n    y = x\nprint(x)"
-    diags = await provider.analyze(code, ctx_data, resolver)
-    assert not any("undefined" in d.message for d in diags)
-
-
-@pytest.mark.asyncio
-async def test_drac_block_for_loop_return(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    alias_text = "!alias aaa echo \n<drac2>\nfor i in range(3):\n  return i\n\n</drac2>"
     diags = await provider.analyze(alias_text, ctx_data, resolver)
-    assert not any("undefined" in d.message for d in diags)
-
-
-@pytest.mark.asyncio
-async def test_handles_alias_drac_block(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    alias_text = "!alias hello echo\n<drac2>\nx = 3\nreturn x\n</drac2>"
-    diags = await provider.analyze(alias_text, ctx_data, resolver)
-    assert diags == []
+    if not expected_messages:
+        assert diags == []
+    else:
+        messages = " ".join(d.message for d in diags)
+        for expected in expected_messages:
+            assert expected in messages
+    if expected_command is not None:
+        rendered = await render_alias_command(alias_text, provider._executor, ctx_data, resolver)
+        assert rendered.command == expected_command
 
 
 @pytest.mark.asyncio
@@ -144,93 +125,3 @@ async def test_drac_block_diagnostics_offset_respects_inline_char(tmp_path):
     # bad_var starts after the prefix and opening tag
     assert diag.range.start.line == 0
     assert diag.range.start.character > alias_text.index("<drac2>")
-
-
-@pytest.mark.asyncio
-async def test_reports_bad_args(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    diags = await provider.analyze("len(1, 2)", ctx_data, resolver)
-    assert any("invalid arguments" in d.message for d in diags)
-
-
-@pytest.mark.asyncio
-async def test_reports_import_usage(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    diags = await provider.analyze("import os\nx=1", ctx_data, resolver)
-    assert any("Imports are not supported" in d.message for d in diags)
-
-
-@pytest.mark.asyncio
-async def test_blocks_private_method_calls(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    diags = await provider.analyze("class X:\n    def _hidden(self):\n        return 1\n\nX()._hidden()", ctx_data, resolver)
-    assert any("private methods" in d.message for d in diags)
-
-
-@pytest.mark.asyncio
-async def test_roll_and_vroll_available(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    diags = await provider.analyze("x = roll('1d1')\ny = vroll('1d1')\nx + y.total", ctx_data, resolver)
-    assert not any("undefined" in d.message for d in diags)
-
-
-@pytest.mark.asyncio
-async def test_warns_when_character_context_missing(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    diags = await provider.analyze("character().hp", ctx_data, resolver)
-    assert any("character context" in d.message for d in diags)
-
-
-@pytest.mark.asyncio
-async def test_warns_when_combat_context_missing(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    diags = await provider.analyze("combat().round_num", ctx_data, resolver)
-    assert any("combat context" in d.message for d in diags)
-
-
-@pytest.mark.asyncio
-async def test_warns_when_character_not_called(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    diags = await provider.analyze("character.hp", ctx_data, resolver)
-    assert any("Call character()" in d.message for d in diags)
-
-
-@pytest.mark.asyncio
-async def test_warns_for_iterable_attribute_chains(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources(), combat={"combatants": []})
-
-    diags = await provider.analyze("combat().combatants.hp", ctx_data, resolver)
-    assert any("index or iterate" in d.message for d in diags)
-
-
-@pytest.mark.asyncio
-async def test_warns_when_calling_properties(tmp_path):
-    provider = _provider()
-    resolver = _resolver(tmp_path)
-    ctx_data = ContextData(vars=VarSources())
-
-    diags = await provider.analyze("ctx.author()", ctx_data, resolver)
-    assert any("property" in d.message for d in diags)
