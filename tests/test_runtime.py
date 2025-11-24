@@ -1,9 +1,10 @@
 import httpx
 import pytest
 
-from avrae_ls.config import VarSources
+from avrae_ls.argparser import InvalidArgument
+from avrae_ls.config import AvraeServiceConfig, VarSources
 from avrae_ls.context import ContextData, GVarResolver
-from avrae_ls.runtime import FunctionRequiresCharacter, MockExecutor
+from avrae_ls.runtime import FunctionRequiresCharacter, MockExecutor, _parse_coins
 
 
 def _ctx():
@@ -21,6 +22,30 @@ def _resolver(tmp_path):
     res = GVarResolver(cfg)
     res.reset({"foo": "bar", "mod": "answer = 'module-value'"})
     return res
+
+
+@pytest.mark.parametrize(
+    ("args", "include_total", "expected"),
+    [
+        ("+10", True, {"pp": 0, "gp": 10, "ep": 0, "sp": 0, "cp": 0, "total": 10}),
+        ("-10.47", True, {"pp": 0, "gp": 0, "ep": 0, "sp": 0, "cp": -1047, "total": -10.47}),
+        ("+10.388888", False, {"pp": 0, "gp": 10, "ep": 0, "sp": 3, "cp": 8}),
+        ("10.388888", True, {"pp": 0, "gp": 10, "ep": 0, "sp": 3, "cp": 8, "total": 10.38}),
+        ("+10cp +10gp -8ep", True, {"pp": 0, "gp": 10, "ep": -8, "sp": 0, "cp": 10, "total": 6.1}),
+        ("+10cp10gp", True, {"pp": 0, "gp": 10, "ep": 0, "sp": 0, "cp": 10, "total": 10.1}),
+        ("10cp-10   gp", False, {"pp": 0, "gp": -10, "ep": 0, "sp": 0, "cp": 10}),
+        ("10     cp10    gp", True, {"pp": 0, "gp": 10, "ep": 0, "sp": 0, "cp": 10, "total": 10.1}),
+        ("+1,001GP -50SP", True, {"pp": 0, "gp": 1001, "ep": 0, "sp": -50, "cp": 0, "total": 996.0}),
+    ],
+)
+def test_parse_coins_parity(args, include_total, expected):
+    assert _parse_coins(args, include_total=include_total) == expected
+
+
+@pytest.mark.parametrize("invalid", ["", "abc", "10xp", "++10gp"])
+def test_parse_coins_invalid(invalid):
+    with pytest.raises(InvalidArgument):
+        _parse_coins(invalid)
 
 
 @pytest.mark.asyncio
@@ -461,6 +486,55 @@ async def test_verify_signature_cached(monkeypatch, tmp_path):
     assert result.error is None
     assert calls == ["sig1", "sig2"]
     assert result.value["user_data"] == 2
+
+
+@pytest.mark.asyncio
+async def test_verify_signature_retries(monkeypatch, tmp_path):
+    calls: list[dict] = []
+
+    def _fake_post(url, json=None, headers=None, timeout=None):
+        calls.append({"json": json, "headers": headers, "timeout": timeout})
+        if len(calls) < 3:
+            raise httpx.TimeoutException("network timeout")
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": {
+                    "user_data": len(calls),
+                },
+            },
+        )
+
+    monkeypatch.setattr("avrae_ls.runtime.httpx.post", _fake_post)
+
+    cfg = AvraeServiceConfig(verify_timeout=9.5, verify_retries=2, token="secret-token")
+    executor = MockExecutor(cfg)
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+    result = await executor.run("verify_signature('sig-retry')", ctx, resolver)
+    assert result.error is None
+    assert len(calls) == 3
+    assert all(call["timeout"] == 9.5 for call in calls)
+    assert all(call["json"] == {"signature": "sig-retry"} for call in calls)
+    assert all(call["headers"].get("Authorization") == "secret-token" for call in calls)
+    assert result.value["user_data"] == 3
+
+
+@pytest.mark.asyncio
+async def test_verify_signature_http_error(monkeypatch, tmp_path):
+    def _fake_post(url, json=None, headers=None, timeout=None):
+        return httpx.Response(500, json={"error": "nope"})
+
+    monkeypatch.setattr("avrae_ls.runtime.httpx.post", _fake_post)
+
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+    result = await executor.run("verify_signature('bad')", ctx, resolver)
+    assert result.error is not None
+    assert "HTTP 500" in str(result.error)
+    assert "nope" in str(result.error)
 
 
 def test_documented_builtins_present():

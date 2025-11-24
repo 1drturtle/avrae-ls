@@ -18,7 +18,7 @@ from .alias_preview import render_alias_command, simulate_command
 from .parser import find_draconic_blocks
 from .signature_help import load_signatures, signature_help_for_code
 from .completions import gather_suggestions, completion_items_for_position, hover_for_position
-from .symbols import build_symbol_table, document_symbols, find_definition_range
+from .symbols import build_symbol_table, document_symbols, find_definition_range, find_references, range_for_word
 from .argument_parsing import apply_argument_parsing
 
 __version__ = "0.1.0"
@@ -140,6 +140,43 @@ def on_definition(server: AvraeLanguageServer, params: types.DefinitionParams):
     if rng is None:
         return None
     return types.Location(uri=params.text_document.uri, range=rng)
+
+
+@ls.feature(types.TEXT_DOCUMENT_REFERENCES)
+def on_references(server: AvraeLanguageServer, params: types.ReferenceParams):
+    doc = server.workspace.get_text_document(params.text_document.uri)
+    table = build_symbol_table(doc.source)
+    word = doc.word_at_position(params.position)
+    if not word or not table.lookup(word):
+        return []
+
+    ranges = find_references(table, doc.source, word, include_declaration=params.context.include_declaration)
+    return [types.Location(uri=params.text_document.uri, range=rng) for rng in ranges]
+
+
+@ls.feature(types.TEXT_DOCUMENT_PREPARE_RENAME)
+def on_prepare_rename(server: AvraeLanguageServer, params: types.PrepareRenameParams):
+    doc = server.workspace.get_text_document(params.text_document.uri)
+    table = build_symbol_table(doc.source)
+    word = doc.word_at_position(params.position)
+    if not word or not table.lookup(word):
+        return None
+    return range_for_word(doc.source, params.position)
+
+
+@ls.feature(types.TEXT_DOCUMENT_RENAME)
+def on_rename(server: AvraeLanguageServer, params: types.RenameParams):
+    doc = server.workspace.get_text_document(params.text_document.uri)
+    table = build_symbol_table(doc.source)
+    word = doc.word_at_position(params.position)
+    if not word or not table.lookup(word) or not params.new_name:
+        return None
+
+    ranges = find_references(table, doc.source, word, include_declaration=True)
+    if not ranges:
+        return None
+    edits = [types.TextEdit(range=rng, new_text=params.new_name) for rng in ranges]
+    return types.WorkspaceEdit(changes={params.text_document.uri: edits})
 
 
 @ls.feature(types.WORKSPACE_SYMBOL)

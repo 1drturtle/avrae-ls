@@ -619,7 +619,7 @@ class AliasResistances(_DirMixin):
     @staticmethod
     def _entries(key: str, _data: Mapping[str, Any]) -> list[ResistanceEntry]:
         entries = []
-        for entry in data.get(key, []):
+        for entry in _data.get(key, []):
             entries.append(
                 ResistanceEntry(
                     dtype=str(entry.get("dtype", "")),

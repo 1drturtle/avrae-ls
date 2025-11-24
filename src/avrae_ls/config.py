@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, Mapping, Tuple
 
 CONFIG_FILENAME = ".avraels.json"
 log = logging.getLogger(__name__)
+_ENV_VAR_PATTERN = re.compile(r"\$(\w+)|\$\{([^}]+)\}")
 
 
 class ConfigError(Exception):
@@ -25,6 +28,8 @@ class DiagnosticSettings:
 class AvraeServiceConfig:
     base_url: str = "https://api.avrae.io"
     token: str | None = None
+    verify_timeout: float = 5.0
+    verify_retries: int = 0
 
 
 @dataclass
@@ -360,6 +365,30 @@ class AvraeLSConfig:
         )
 
 
+def _expand_env_vars(data: Any, env: Mapping[str, str], missing_vars: set[str]) -> Any:
+    if isinstance(data, dict):
+        return {key: _expand_env_vars(value, env, missing_vars) for key, value in data.items()}
+    if isinstance(data, list):
+        return [_expand_env_vars(value, env, missing_vars) for value in data]
+    if isinstance(data, str):
+        def _replace(match: re.Match[str]) -> str:
+            var = match.group(1) or match.group(2) or ""
+            if var in env:
+                return env[var]
+            missing_vars.add(var)
+            return ""
+
+        return _ENV_VAR_PATTERN.sub(_replace, data)
+    return data
+
+
+def _coerce_optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    value_str = str(value)
+    return value_str if value_str.strip() else None
+
+
 def load_config(workspace_root: Path) -> Tuple[AvraeLSConfig, Iterable[str]]:
     """Load `.avraels.json` from the workspace root, returning config and warnings."""
     path = workspace_root / CONFIG_FILENAME
@@ -374,12 +403,42 @@ def load_config(workspace_root: Path) -> Tuple[AvraeLSConfig, Iterable[str]]:
         return AvraeLSConfig.default(workspace_root), [warning]
 
     warnings: list[str] = []
+    env_missing: set[str] = set()
+    env = dict(os.environ)
+    env.setdefault("workspaceRoot", str(workspace_root))
+    env.setdefault("workspaceFolder", str(workspace_root))
+    raw = _expand_env_vars(raw, env, env_missing)
+    for var in sorted(env_missing):
+        warning = f"{CONFIG_FILENAME}: environment variable '{var}' is not set; substituting an empty string."
+        warnings.append(warning)
+        log.warning(warning)
+
     enable_gvar_fetch = bool(raw.get("enableGvarFetch", False))
 
     service_cfg = raw.get("avraeService") or {}
+    def _get_service_timeout(raw_timeout) -> float:
+        try:
+            timeout = float(raw_timeout)
+            if timeout > 0:
+                return timeout
+        except Exception:
+            pass
+        return AvraeServiceConfig.verify_timeout
+
+    def _get_service_retries(raw_retries) -> int:
+        try:
+            retries = int(raw_retries)
+            if retries >= 0:
+                return retries
+        except Exception:
+            pass
+        return AvraeServiceConfig.verify_retries
+
     service = AvraeServiceConfig(
         base_url=str(service_cfg.get("baseUrl") or AvraeServiceConfig.base_url),
-        token=service_cfg.get("token"),
+        token=_coerce_optional_str(service_cfg.get("token")),
+        verify_timeout=_get_service_timeout(service_cfg.get("verifySignatureTimeout")),
+        verify_retries=_get_service_retries(service_cfg.get("verifySignatureRetries")),
     )
 
     diag_cfg = raw.get("diagnostics") or {}

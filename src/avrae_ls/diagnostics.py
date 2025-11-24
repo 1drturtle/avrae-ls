@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import inspect
 import ast
 import logging
-import inspect
-from typing import Iterable, List, Sequence, Set
+from typing import Dict, Iterable, List, Sequence, Set
 
 import draconic
 from lsprotocol import types
 
 from .argument_parsing import apply_argument_parsing
+from .completions import _infer_type_map, _resolve_type_name, _type_meta
 from .config import DiagnosticSettings
 from .context import ContextData, GVarResolver
 from .parser import find_draconic_blocks
@@ -78,6 +79,9 @@ class DiagnosticProvider:
         diagnostics.extend(_check_imports(body, self._settings.semantic_level))
         diagnostics.extend(_check_call_args(body, self._builtin_signatures, self._settings.semantic_level))
         diagnostics.extend(_check_private_method_calls(body))
+        diagnostics.extend(
+            _check_api_misuse(body, code, ctx_data, self._settings.semantic_level)
+        )
         if line_shift:
             diagnostics = _shift_diagnostics(diagnostics, line_shift, 0)
         return diagnostics
@@ -280,6 +284,207 @@ def _check_private_method_calls(body: Sequence[ast.AST]) -> List[types.Diagnosti
     for stmt in body:
         finder.visit(stmt)
     return diagnostics
+
+
+def _check_api_misuse(
+    body: Sequence[ast.AST],
+    code: str,
+    ctx_data: ContextData,
+    severity_level: str,
+) -> List[types.Diagnostic]:
+    """Heuristics for common API mistakes (list vs scalar, missing context, property calls)."""
+    diagnostics: list[types.Diagnostic] = []
+    module = ast.Module(body=list(body), type_ignores=[])
+    parent_map = _build_parent_map(module)
+    assigned_names = _collect_assigned_names(module)
+    type_map = _diagnostic_type_map(code)
+    context_seen: set[str] = set()
+
+    for node in ast.walk(module):
+        if isinstance(node, ast.Call):
+            diagnostics.extend(_context_call_diagnostics(node, ctx_data, severity_level, context_seen))
+            diagnostics.extend(_property_call_diagnostics(node, type_map, code, severity_level))
+        if isinstance(node, ast.Attribute):
+            diagnostics.extend(_uncalled_context_attr_diagnostics(node, assigned_names, severity_level))
+            diagnostics.extend(_iterable_attr_diagnostics(node, parent_map, type_map, code, severity_level))
+    return diagnostics
+
+
+def _context_call_diagnostics(
+    node: ast.Call,
+    ctx_data: ContextData,
+    severity_level: str,
+    seen: set[str],
+) -> List[types.Diagnostic]:
+    diagnostics: list[types.Diagnostic] = []
+    if isinstance(node.func, ast.Name):
+        if node.func.id == "character" and not ctx_data.character and "character" not in seen:
+            seen.add("character")
+            diagnostics.append(
+                _make_diagnostic(
+                    node.func,
+                    "No character context configured; character() will raise at runtime.",
+                    severity_level,
+                )
+            )
+        elif node.func.id == "combat" and not ctx_data.combat and "combat" not in seen:
+            seen.add("combat")
+            diagnostics.append(
+                _make_diagnostic(
+                    node.func,
+                    "No combat context configured; combat() will return None.",
+                    severity_level,
+                )
+            )
+    return diagnostics
+
+
+def _property_call_diagnostics(
+    node: ast.Call,
+    type_map: Dict[str, str],
+    code: str,
+    severity_level: str,
+) -> List[types.Diagnostic]:
+    if not isinstance(node.func, ast.Attribute):
+        return []
+    base_type = _resolve_expr_type(node.func.value, type_map, code)
+    if not base_type:
+        return []
+    meta = _type_meta(base_type)
+    attr = node.func.attr
+    if attr in meta.methods or attr not in meta.attrs:
+        return []
+    receiver = _expr_to_str(node.func.value) or base_type
+    return [
+        _make_diagnostic(
+            node.func,
+            f"'{attr}' on {receiver} is a property; drop the parentheses.",
+            severity_level,
+        )
+    ]
+
+
+def _uncalled_context_attr_diagnostics(
+    node: ast.Attribute,
+    assigned_names: Set[str],
+    severity_level: str,
+) -> List[types.Diagnostic]:
+    if isinstance(node.value, ast.Name) and node.value.id in {"character", "combat"} and node.value.id not in assigned_names:
+        call_hint = f"{node.value.id}()"
+        return [
+            _make_diagnostic(
+                node.value,
+                f"Call {call_hint} before accessing '{node.attr}'.",
+                severity_level,
+            )
+        ]
+    return []
+
+
+def _iterable_attr_diagnostics(
+    node: ast.Attribute,
+    parent_map: Dict[ast.AST, ast.AST],
+    type_map: Dict[str, str],
+    code: str,
+    severity_level: str,
+) -> List[types.Diagnostic]:
+    parent = parent_map.get(node)
+    if parent is None:
+        return []
+    if isinstance(parent, ast.Subscript) and parent.value is node:
+        return []
+
+    base_type = _resolve_expr_type(node.value, type_map, code)
+    if not base_type:
+        return []
+    meta = _type_meta(base_type)
+    attr_meta = meta.attrs.get(node.attr)
+    if not attr_meta:
+        return []
+
+    is_collection = bool(attr_meta.element_type) or attr_meta.type_name in {"list", "dict"}
+    if not is_collection:
+        return []
+
+    expr_label = _expr_to_str(node) or node.attr
+    element_label = attr_meta.element_type or "items"
+    container_label = attr_meta.type_name or "collection"
+
+    if isinstance(parent, ast.Attribute) and parent.value is node:
+        next_attr = parent.attr
+        message = f"'{expr_label}' is a {container_label} of {element_label}; index or iterate before accessing '{next_attr}'."
+        return [_make_diagnostic(node, message, severity_level)]
+
+    if isinstance(parent, ast.Call) and parent.func is node:
+        message = f"'{expr_label}' is a {container_label} of {element_label}; index or iterate before calling it."
+        return [_make_diagnostic(node, message, severity_level)]
+
+    return []
+
+
+def _diagnostic_type_map(code: str) -> Dict[str, str]:
+    mapping = _infer_type_map(code)
+    if mapping:
+        return mapping
+    wrapped, _ = _wrap_draconic(code)
+    return _infer_type_map(wrapped)
+
+
+def _resolve_expr_type(expr: ast.AST, type_map: Dict[str, str], code: str) -> str:
+    expr_text = _expr_to_str(expr)
+    if not expr_text:
+        return ""
+    return _resolve_type_name(expr_text, code, type_map)
+
+
+def _expr_to_str(expr: ast.AST) -> str:
+    try:
+        return ast.unparse(expr)
+    except Exception:
+        return ""
+
+
+def _collect_assigned_names(module: ast.Module) -> Set[str]:
+    assigned: set[str] = set()
+
+    class Collector(ast.NodeVisitor):
+        def visit_Assign(self, node: ast.Assign):
+            for target in node.targets:
+                assigned.update(_names_in_target(target))
+            self.generic_visit(node)
+
+        def visit_AnnAssign(self, node: ast.AnnAssign):
+            assigned.update(_names_in_target(node.target))
+            self.generic_visit(node)
+
+        def visit_For(self, node: ast.For):
+            assigned.update(_names_in_target(node.target))
+            self.generic_visit(node)
+
+        def visit_AsyncFor(self, node: ast.AsyncFor):
+            assigned.update(_names_in_target(node.target))
+            self.generic_visit(node)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef):
+            assigned.add(node.name)
+            for arg in node.args.args:
+                assigned.add(arg.arg)
+            self.generic_visit(node)
+
+        def visit_ClassDef(self, node: ast.ClassDef):
+            assigned.add(node.name)
+            self.generic_visit(node)
+
+    Collector().visit(module)
+    return assigned
+
+
+def _build_parent_map(root: ast.AST) -> Dict[ast.AST, ast.AST]:
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(root):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+    return parents
 
 
 def _make_diagnostic(node: ast.AST, message: str, level: str) -> types.Diagnostic:

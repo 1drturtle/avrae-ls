@@ -48,3 +48,58 @@ def test_ctx_api_mock_schema():
     assert ctx.channel.name
     assert ctx.author.display_name
     assert len(ctx.author.get_roles()) >= 1
+
+
+def test_character_attack_list_helpers():
+    char = CharacterAPI(
+        {
+            "attacks": [
+                {"name": "Claw", "verb": "slashes", "raw": {"damage": "1d4+2 slashing"}},
+                {"name": "Bite"},
+            ]
+        }
+    )
+    attacks = char.attacks
+    assert len(attacks) == 2
+    first = attacks[0]
+    assert first.verb == "slashes"
+    assert str(first) == "Claw slashes: 1d4+2 slashing"
+    assert str(attacks).splitlines()[-1] == "Bite"
+
+
+def test_character_consumables_normalized_and_mutated():
+    char = CharacterAPI({"consumables": [{"name": "Arrows", "value": 20, "max": 40}]})
+    assert char.cc_exists("Arrows")
+    assert char.get_cc("Arrows") == 20
+    assert char.mod_cc("Arrows", -5) == 15
+    assert char.set_cc("Arrows", value=10, maximum=50) == 10
+    assert char.get_cc_max("Arrows") == 50
+    assert char.delete_cc("Arrows") is not None
+    assert not char.cc_exists("Arrows")
+
+
+def test_spellbook_slot_helpers_and_casting():
+    book = CharacterAPI(
+        {
+            "spellbook": {
+                "slots": {1: 2, 2: 1},
+                "max_slots": {1: 3, 2: 2},
+                "max_pact_slots": 2,
+                "num_pact_slots": 1,
+                "spells": [{"name": "Magic Missile", "prepared": True}],
+            }
+        }
+    ).spellbook
+
+    assert book.slots_str(1) == "2/3"
+    assert book.can_cast("Magic Missile", 1)
+    assert book.find("magic missile")[0].prepared is True
+
+    book.cast("Magic Missile", 2)
+    assert book.get_slots(2) == 0
+
+    book.reset_slots()
+    assert book.get_slots(1) == 3
+
+    book.reset_pact_slots()
+    assert book.num_pact_slots == 2

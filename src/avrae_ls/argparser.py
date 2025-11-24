@@ -2,7 +2,7 @@ import collections
 import itertools
 import re
 import string
-from typing import Iterator
+from typing import ClassVar, Iterator
 
 
 class BadArgument(Exception):
@@ -169,6 +169,19 @@ def argparse(args, character=None, splitter=argsplit, parse_ephem=True) -> "Pars
 
 
 class ParsedArguments:
+    ATTRS: ClassVar[list[str]] = []
+    METHODS: ClassVar[list[str]] = [
+        "get",
+        "last",
+        "adv",
+        "join",
+        "ignore",
+        "update",
+        "update_nx",
+        "set_context",
+        "add_context",
+    ]
+
     def __init__(self, args: list[Argument]):
         self._parsed = collections.defaultdict(lambda: [])
         for arg in args:
@@ -299,7 +312,7 @@ class ParsedArguments:
     def __contains__(self, item):
         return item in self._parsed and self._parsed[item]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._parsed)
 
     def __setitem__(self, key, value):
@@ -317,7 +330,7 @@ class ParsedArguments:
         if arg in self._parsed:
             del self._parsed[arg]
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._parsed.keys())
 
     def __repr__(self):

@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import random
+import re
 import time
 from types import SimpleNamespace
 try:  # optional dependency
@@ -98,7 +99,66 @@ def _vroll_dice(dice: str, multiply: int = 1, add: int = 0) -> SimpleRollResult 
     return SimpleRollResult(rolled)
 
 
-def _parse_coins(args: str):
+@dataclass
+class _CoinsArgs:
+    pp: int = 0
+    gp: int = 0
+    ep: int = 0
+    sp: int = 0
+    cp: int = 0
+    explicit: bool = False
+
+    @property
+    def total(self) -> float:
+        return (self.pp * 10) + self.gp + (self.ep * 0.5) + (self.sp * 0.1) + (self.cp * 0.01)
+
+
+def _parse_coin_args(args: str) -> _CoinsArgs:
+    cleaned = str(args).replace(",", "")
+    try:
+        return _parse_coin_args_float(float(cleaned))
+    except ValueError:
+        return _parse_coin_args_re(cleaned)
+
+
+def _parse_coin_args_float(coins: float) -> _CoinsArgs:
+    total_copper = int(round(coins * 100, 1))
+    if coins < 0:
+        return _CoinsArgs(cp=total_copper)
+    return _CoinsArgs(
+        gp=total_copper // 100,
+        sp=(total_copper % 100) // 10,
+        cp=total_copper % 10,
+    )
+
+
+def _parse_coin_args_re(args: str) -> _CoinsArgs:
+    is_valid = re.fullmatch(r"(([+-]?\d+)\s*([pgesc]p)\s*)+", args, re.IGNORECASE)
+    if not is_valid:
+        raise avrae_argparser.InvalidArgument(
+            "Coins must be a number or a currency string, e.g. `+101.2` or `10cp +101gp -2sp`."
+        )
+
+    out = _CoinsArgs(explicit=True)
+    for coin_match in re.finditer(r"(?P<amount>[+-]?\d+)\s*(?P<currency>[pgesc]p)", args, re.IGNORECASE):
+        amount = int(coin_match["amount"])
+        currency = coin_match["currency"].lower()
+
+        if currency == "pp":
+            out.pp += amount
+        elif currency == "gp":
+            out.gp += amount
+        elif currency == "ep":
+            out.ep += amount
+        elif currency == "sp":
+            out.sp += amount
+        else:
+            out.cp += amount
+
+    return out
+
+
+def _parse_coins(args: str, include_total: bool = True):
     try:
         from avrae.aliasing.api.functions import parse_coins as avrae_parse_coins
     except Exception:
@@ -106,16 +166,21 @@ def _parse_coins(args: str):
 
     if avrae_parse_coins:
         try:
-            return avrae_parse_coins(str(args))
+            return avrae_parse_coins(str(args), include_total=include_total)
         except Exception:
             pass
 
-    # Fallback: accept numeric as gp, otherwise empty mapping.
-    try:
-        gp = float(str(args))
-        return {"pp": 0, "gp": gp, "ep": 0, "sp": 0, "cp": 0, "total": gp}
-    except Exception:
-        return {"pp": 0, "gp": 0, "ep": 0, "sp": 0, "cp": 0, "total": 0}
+    coin_args = _parse_coin_args(str(args))
+    parsed = {
+        "pp": coin_args.pp,
+        "gp": coin_args.gp,
+        "ep": coin_args.ep,
+        "sp": coin_args.sp,
+        "cp": coin_args.cp,
+    }
+    if include_total:
+        parsed["total"] = coin_args.total
+    return parsed
 
 
 def _default_builtins() -> Dict[str, Any]:
@@ -414,6 +479,9 @@ class MockExecutor:
             verify_cache_sig = sig_str
             verify_cache_error = None
             verify_cache_result = None
+            timeout = float(service_cfg.verify_timeout if service_cfg else AvraeServiceConfig.verify_timeout)
+            retries = int(service_cfg.verify_retries if service_cfg else AvraeServiceConfig.verify_retries)
+            retries = max(0, retries)
 
             def _call_verify_api(signature: str) -> Dict[str, Any]:
                 base_url = (service_cfg.base_url if service_cfg else AvraeServiceConfig.base_url).rstrip("/")
@@ -421,10 +489,18 @@ class MockExecutor:
                 headers = {"Content-Type": "application/json"}
                 if service_cfg and service_cfg.token:
                     headers["Authorization"] = str(service_cfg.token)
-                try:
-                    resp = httpx.post(url, json={"signature": signature}, headers=headers, timeout=5)
-                except Exception as exc:
-                    raise ValueError(f"Failed to verify signature: {exc}") from exc
+                last_exc: Exception | None = None
+                for attempt in range(retries + 1):
+                    try:
+                        resp = httpx.post(url, json={"signature": signature}, headers=headers, timeout=timeout)
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        if attempt >= retries:
+                            raise ValueError(f"Failed to verify signature: {exc}") from exc
+                        continue
+                else:  # pragma: no cover - defensive
+                    raise ValueError(f"Failed to verify signature: {last_exc}") from last_exc
 
                 try:
                     payload = resp.json()
@@ -432,14 +508,17 @@ class MockExecutor:
                     raise ValueError("Failed to verify signature: invalid response body") from exc
 
                 if resp.status_code != 200:
-                    message = payload.get("error") if isinstance(payload, dict) else None
-                    raise ValueError(message or f"Failed to verify signature: HTTP {resp.status_code}")
+                    message = None
+                    if isinstance(payload, dict):
+                        message = payload.get("error") or payload.get("message")
+                    detail = f"{message} (HTTP {resp.status_code})" if message else f"HTTP {resp.status_code}"
+                    raise ValueError(f"Failed to verify signature: {detail}")
 
                 if not isinstance(payload, dict):
                     raise ValueError("Failed to verify signature: invalid response")
                 if payload.get("success") is not True:
                     message = payload.get("error")
-                    raise ValueError(message or "Failed to verify signature: unsuccessful response")
+                    raise ValueError(f"Failed to verify signature: {message or 'unsuccessful response'}")
 
                 data = payload.get("data")
                 if not isinstance(data, dict):

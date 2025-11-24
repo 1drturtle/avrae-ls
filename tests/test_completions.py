@@ -199,3 +199,28 @@ def test_completion_includes_signature_and_doc():
     get_sugg = next(s for s in suggestions if s.name == "get")
     assert "get(name" in get_sugg.detail
     assert "cvar" in (get_sugg.documentation or "")
+
+
+def test_argparse_completions_return_parsed_arguments_methods():
+    code = "\n".join(
+        [
+            "arg_list = 'one two'",
+            "args = argparse(arg_list)",
+            "args.",
+        ]
+    )
+    items = completion_items_for_position(code, line=2, character=len("args."), suggestions=[])
+    labels = {item.label for item in items}
+    assert "get" in labels
+    assert "adv" in labels
+    assert "update_nx" in labels
+
+
+def test_argparse_hover_shows_parsed_arguments_type():
+    cfg = AvraeLSConfig.default(Path("."))
+    ctx_data = ContextData(vars=VarSources())
+    resolver = GVarResolver(cfg)
+    code = "args = argparse('one two')\nargs"
+    hover = hover_for_position(code, line=1, character=len("args"), sigs={}, ctx_data=ctx_data, resolver=resolver)
+    assert hover is not None
+    assert "ParsedArguments" in hover.contents.value

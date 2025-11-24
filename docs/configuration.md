@@ -88,7 +88,7 @@ The language server reads a workspace-level `.avraels.json` file to shape diagno
 
 ### Included fields
 - `enableGvarFetch`: Opt-in to fetch gvars from Avrae using `avraeService.token` when diagnostics/commands encounter `get_gvar`. When disabled, only locally provided gvars are used.
-- `avraeService.baseUrl` / `token`: Host and bearer token for gvar fetches.
+- `avraeService.baseUrl` / `token`: Host and bearer token for gvar fetches. `verifySignatureTimeout` and `verifySignatureRetries` tweak how long `verify_signature` waits and how many times it retries on transport errors.
 - `diagnostics.semanticLevel` / `runtimeLevel`: How LSP diagnostics are reported (`error`, `warning`, `information`, `hint`).
 - `varFiles`: Additional JSON files merged into `vars` for the active profile; workspace-relative unless absolute. Each file uses the same shape as `vars` below.
 - `profiles`: Named context profiles. Each profile can override `ctx`, `combat`, `character`, `vars`, and optionally `description`.

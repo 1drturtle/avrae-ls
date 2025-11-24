@@ -10,14 +10,9 @@ let dracPreviewDecoration;
 
 function activate(context) {
   const serverCommand = "avrae-ls";
-  // const serverArgs = ["tool", "run", "avrae-ls"];
-
-  // Ensure the server runs from the repo root even if the extension host is launched elsewhere.
-
   /** @type {Executable} */
   const serverOptions = {
     command: serverCommand,
-    // args: serverArgs,
     transport: TransportKind.stdio,
   };
 
@@ -133,11 +128,9 @@ function activate(context) {
         result: "",
         error: `Failed to run alias: ${err}`,
       });
-      updateInlineDecorations(document, {});
       return;
     }
     renderPreview(result || {});
-    updateInlineDecorations(document, result || {});
   }
 
   function ensurePreviewPanel(ctx) {
@@ -319,75 +312,6 @@ pre { white-space: pre-wrap; word-break: break-word; }
     }
     if (current) result.push(current);
     return result;
-  }
-
-  function updateInlineDecorations(document, result) {
-    if (!document) return;
-    const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === document.uri.toString());
-    if (!editor) return;
-    if (!dracPreviewDecoration) {
-      dracPreviewDecoration = vscode.window.createTextEditorDecorationType({
-        isWholeLine: true,
-        after: {
-          margin: "0 0 0 12px",
-        },
-      });
-      context.subscriptions.push(dracPreviewDecoration);
-    }
-    const summary = summarizeResult(result);
-    if (!summary) {
-      editor.setDecorations(dracPreviewDecoration, []);
-      return;
-    }
-    const hover = new vscode.MarkdownString(`[View details](command:avrae-ls.showPreview)`);
-    hover.isTrusted = true;
-    const color = result.error ? "var(--vscode-errorForeground)" : "var(--vscode-charts-green)";
-    const ranges = [];
-    const text = document.getText();
-    const regex = /<drac2>([\s\S]*?)<\/drac2>/gi;
-    let match;
-    while ((match = regex.exec(text))) {
-      const start = document.positionAt(match.index);
-      const range = new vscode.Range(start, start);
-      ranges.push({
-        range,
-        hoverMessage: hover,
-        renderOptions: {
-          after: {
-            contentText: " " + summary,
-            color,
-          },
-        },
-      });
-    }
-    editor.setDecorations(dracPreviewDecoration, ranges);
-  }
-
-  function summarizeResult(result) {
-    if (!result || typeof result !== "object") return "";
-    const err = result.error;
-    if (err) {
-      return truncate(`Error: ${String(err)}`);
-    }
-    if (result.stdout) {
-      const firstLine = String(result.stdout).split(/\\r?\\n/)[0];
-      if (firstLine) {
-        return truncate(`stdout: ${firstLine}`);
-      }
-    }
-    if (result.result !== undefined) {
-      try {
-        return truncate(`result: ${JSON.stringify(result.result)}`);
-      } catch {
-        return truncate(`result: ${String(result.result)}`);
-      }
-    }
-    return "Ran successfully";
-  }
-
-  function truncate(text, max = 80) {
-    if (text.length <= max) return text;
-    return text.slice(0, max - 1) + "…";
   }
 }
 

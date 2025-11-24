@@ -184,3 +184,53 @@ async def test_roll_and_vroll_available(tmp_path):
 
     diags = await provider.analyze("x = roll('1d1')\ny = vroll('1d1')\nx + y.total", ctx_data, resolver)
     assert not any("undefined" in d.message for d in diags)
+
+
+@pytest.mark.asyncio
+async def test_warns_when_character_context_missing(tmp_path):
+    provider = _provider()
+    resolver = _resolver(tmp_path)
+    ctx_data = ContextData(vars=VarSources())
+
+    diags = await provider.analyze("character().hp", ctx_data, resolver)
+    assert any("character context" in d.message for d in diags)
+
+
+@pytest.mark.asyncio
+async def test_warns_when_combat_context_missing(tmp_path):
+    provider = _provider()
+    resolver = _resolver(tmp_path)
+    ctx_data = ContextData(vars=VarSources())
+
+    diags = await provider.analyze("combat().round_num", ctx_data, resolver)
+    assert any("combat context" in d.message for d in diags)
+
+
+@pytest.mark.asyncio
+async def test_warns_when_character_not_called(tmp_path):
+    provider = _provider()
+    resolver = _resolver(tmp_path)
+    ctx_data = ContextData(vars=VarSources())
+
+    diags = await provider.analyze("character.hp", ctx_data, resolver)
+    assert any("Call character()" in d.message for d in diags)
+
+
+@pytest.mark.asyncio
+async def test_warns_for_iterable_attribute_chains(tmp_path):
+    provider = _provider()
+    resolver = _resolver(tmp_path)
+    ctx_data = ContextData(vars=VarSources(), combat={"combatants": []})
+
+    diags = await provider.analyze("combat().combatants.hp", ctx_data, resolver)
+    assert any("index or iterate" in d.message for d in diags)
+
+
+@pytest.mark.asyncio
+async def test_warns_when_calling_properties(tmp_path):
+    provider = _provider()
+    resolver = _resolver(tmp_path)
+    ctx_data = ContextData(vars=VarSources())
+
+    diags = await provider.analyze("ctx.author()", ctx_data, resolver)
+    assert any("property" in d.message for d in diags)

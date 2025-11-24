@@ -11,6 +11,7 @@ from typing import Any, ClassVar, Dict, Iterable, List, Optional
 from lsprotocol import types
 
 from .context import ContextData, GVarResolver
+from .argparser import ParsedArguments
 from .runtime import _default_builtins
 from .api import (
     AliasAction,
@@ -147,6 +148,7 @@ TYPE_MAP: Dict[str, object] = {
     "list": _BuiltinList,
     "dict": _BuiltinDict,
     "str": _BuiltinStr,
+    "ParsedArguments": ParsedArguments,
 }
 
 
@@ -498,6 +500,8 @@ def _infer_type_map(code: str) -> Dict[str, str]:
                     return value.func.id, None
                 if value.func.id == "vroll":
                     return "SimpleRollResult", None
+                if value.func.id == "argparse":
+                    return "ParsedArguments", None
                 if value.func.id in {"list", "dict", "str"}:
                     return value.func.id, None
             if isinstance(value, ast.List):

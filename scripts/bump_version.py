@@ -3,15 +3,39 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+import argparse
 
 import tomllib
 
 
-def bump_patch(version: str) -> str:
+def _normalize(version: str) -> list[str]:
     parts = version.split(".")
     while len(parts) < 3:
         parts.append("0")
-    major, minor, patch = parts[:3]
+    return parts[:3]
+
+
+def bump_patch(version: str) -> str:
+    major, minor, patch = _normalize(version)
+    return ".".join([major, minor, str(int(patch) + 1)])
+
+
+def bump_minor(version: str) -> str:
+    major, minor, _ = _normalize(version)
+    return ".".join([major, str(int(minor) + 1), "0"])
+
+
+def bump_major(version: str) -> str:
+    major, _, _ = _normalize(version)
+    return ".".join([str(int(major) + 1), "0", "0"])
+
+
+def bump(version: str, level: str) -> str:
+    if level == "major":
+        return bump_major(version)
+    if level == "minor":
+        return bump_minor(version)
+    major, minor, patch = _normalize(version)
     return ".".join([major, minor, str(int(patch) + 1)])
 
 
@@ -47,8 +71,18 @@ def update_package_lock(path: Path, new_version: str) -> str | None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Bump project version.")
+    parser.add_argument(
+        "level",
+        nargs="?",
+        default="patch",
+        choices=["patch", "minor", "major"],
+        help="Which part of the version to bump (default: patch).",
+    )
+    args = parser.parse_args()
+
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
-    new_version = bump_patch(pyproject)
+    new_version = bump(pyproject, args.level)
     py_old = update_pyproject(new_version)
     pkg_old = update_package_json(Path("vscode-extension/package.json"), new_version)
     lock_old = update_package_lock(Path("vscode-extension/package-lock.json"), new_version)
