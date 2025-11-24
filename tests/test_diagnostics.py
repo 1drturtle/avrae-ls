@@ -61,6 +61,7 @@ async def test_fetches_gvar_when_enabled(tmp_path):
         pytest.param('!alias echo <drac2> return "s"\n</drac2>', "s", [], None, None, id="inline_return_alias"),
         pytest.param("!alias inline echo prefix <drac2>bad_var</drac2> suffix", None, ["undefined"], None, None, id="inline_bad_var"),
         pytest.param("using(mod='mod')\nmod.answer", None, [], {"mod": "answer = 'ok'"}, None, id="using_imported_name"),
+        pytest.param('!alias next embed \n-title "Are you done?"', "embed \n-title \"Are you done?\"", [], None, None, id="plain_embed_flags"),
         pytest.param("for x in range(3):\n    y = x\nprint(x)", None, [], None, None, id="for_loop_binds_target"),
         pytest.param("!alias aaa echo \n<drac2>\nfor i in range(3):\n  return i\n\n</drac2>", "echo \n0", [], None, None, id="drac_loop_return"),
         pytest.param("!alias hello echo\n<drac2>\nx = 3\nreturn x\n</drac2>", "echo\n3", [], None, None, id="drac_simple_return"),

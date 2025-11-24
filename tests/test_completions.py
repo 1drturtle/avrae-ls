@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from avrae_ls.completions import (
     completion_items_for_position,
     gather_suggestions,
@@ -109,6 +111,14 @@ def test_character_attacks_attribute_completions_with_binding():
     assert "raw" in labels
 
 
+def test_character_skill_completion_uses_alias_skill():
+    code = "x = character().skills.arcana\nx."
+    items = completion_items_for_position(code, line=1, character=len("x."), suggestions=[])
+    labels = {item.label for item in items}
+    assert {"value", "bonus", "adv"}.issubset(labels)
+    assert "levels" not in labels
+
+
 def test_builtin_list_completions():
     code = "arr = []\narr."
     items = completion_items_for_position(code, line=1, character=len("arr."), suggestions=[])
@@ -168,18 +178,34 @@ def test_attribute_completion_inside_call_does_not_use_builtin_suggestions():
     assert "abs" not in labels_idx
 
 
-def test_loop_iteration_completions_use_element_type():
-    code = "\n".join(
-        [
-            "x = character().attacks",
-            "for i in x:",
-            "    i.",
-        ]
-    )
-    items = completion_items_for_position(code, line=2, character=len("    i."), suggestions=[])
+@pytest.mark.parametrize(
+    ("code", "line", "character", "expected_labels"),
+    [
+        (
+            "\n".join(["x = character().attacks", "for i in x:", "    i."]),
+            2,
+            len("    i."),
+            {"name", "verb"},
+        ),
+        (
+            "\n".join(["chars = [character()]", "for c in chars:", "    c."]),
+            2,
+            len("    c."),
+            {"name", "actions"},
+        ),
+        (
+            "\n".join(["data = {'hero': character()}", "hero = data.get('hero')", "hero."]),
+            2,
+            len("hero."),
+            {"name", "skills"},
+        ),
+    ],
+)
+def test_inferred_element_type_completions(code: str, line: int, character: int, expected_labels: set[str]):
+    items = completion_items_for_position(code, line=line, character=character, suggestions=[])
     labels = {item.label for item in items}
-    assert "name" in labels
-    assert "verb" in labels
+    for label in expected_labels:
+        assert label in labels
 
 
 def test_character_actions_attribute_completions():

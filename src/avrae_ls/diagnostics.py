@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import inspect
 import ast
+import inspect
 import logging
-from typing import Dict, Iterable, List, Sequence, Set
+from typing import Any, Dict, Iterable, List, Sequence, Set
 
 import draconic
 from lsprotocol import types
 
+from .alias_preview import simulate_command
+from .codes import MISSING_GVAR_CODE, UNDEFINED_NAME_CODE, UNSUPPORTED_IMPORT_CODE
 from .argument_parsing import apply_argument_parsing
 from .completions import _infer_type_map, _resolve_type_name, _type_meta
 from .config import DiagnosticSettings
@@ -41,6 +43,10 @@ class DiagnosticProvider:
         source = apply_argument_parsing(source)
         blocks = find_draconic_blocks(source)
         if not blocks:
+            plain = _plain_command_diagnostics(source)
+            if plain is not None:
+                diagnostics.extend(plain)
+                return diagnostics
             diagnostics.extend(await self._analyze_code(source, ctx_data, gvar_resolver))
             return diagnostics
 
@@ -150,6 +156,8 @@ class DiagnosticProvider:
                             node,
                             f"'{node.id}' may be undefined in this scope",
                             severity_level,
+                            code=UNDEFINED_NAME_CODE,
+                            data={"name": node.id},
                         )
                     )
 
@@ -237,6 +245,8 @@ async def _check_gvars(
                         arg_node,
                         f"Unknown gvar '{gvar_id}'",
                         settings.semantic_level,
+                        code=MISSING_GVAR_CODE,
+                        data={"gvar": gvar_id},
                     )
                 )
 
@@ -487,7 +497,14 @@ def _build_parent_map(root: ast.AST) -> Dict[ast.AST, ast.AST]:
     return parents
 
 
-def _make_diagnostic(node: ast.AST, message: str, level: str) -> types.Diagnostic:
+def _make_diagnostic(
+    node: ast.AST,
+    message: str,
+    level: str,
+    *,
+    code: str | None = None,
+    data: Dict[str, Any] | None = None,
+) -> types.Diagnostic:
     severity = SEVERITY.get(level, types.DiagnosticSeverity.Warning)
     if hasattr(node, "lineno"):
         rng = _range_from_positions(
@@ -506,6 +523,8 @@ def _make_diagnostic(node: ast.AST, message: str, level: str) -> types.Diagnosti
         range=rng,
         severity=severity,
         source="avrae-ls",
+        code=code,
+        data=data,
     )
 
 
@@ -666,10 +685,27 @@ def _check_imports(body: Sequence[ast.AST], severity_level: str) -> List[types.D
 
     class Visitor(ast.NodeVisitor):
         def visit_Import(self, node: ast.Import):
-            diagnostics.append(_make_diagnostic(node, "Imports are not supported in draconic aliases", severity_level))
+            module = node.names[0].name if node.names else None
+            diagnostics.append(
+                _make_diagnostic(
+                    node,
+                    "Imports are not supported in draconic aliases",
+                    severity_level,
+                    code=UNSUPPORTED_IMPORT_CODE,
+                    data={"module": module} if module else None,
+                )
+            )
 
         def visit_ImportFrom(self, node: ast.ImportFrom):
-            diagnostics.append(_make_diagnostic(node, "Imports are not supported in draconic aliases", severity_level))
+            diagnostics.append(
+                _make_diagnostic(
+                    node,
+                    "Imports are not supported in draconic aliases",
+                    severity_level,
+                    code=UNSUPPORTED_IMPORT_CODE,
+                    data={"module": node.module},
+                )
+            )
 
     visitor = Visitor()
     for stmt in body:
@@ -692,3 +728,24 @@ def _range_from_positions(
         character=max(((end_col_offset or col_offset or 1) - 1), 0),
     )
     return types.Range(start=start, end=end)
+
+
+def _plain_command_diagnostics(source: str) -> list[types.Diagnostic] | None:
+    """Handle simple commands (embed/echo) without draconic blocks."""
+    simulated = simulate_command(source)
+    if not simulated.command_name:
+        return None
+    if simulated.command_name == "embed":
+        if simulated.validation_error:
+            return [
+                types.Diagnostic(
+                    message=simulated.validation_error,
+                    range=_range_from_positions(1, 1, 1, 1),
+                    severity=SEVERITY["warning"],
+                    source="avrae-ls",
+                )
+            ]
+        return []
+    if simulated.command_name == "echo":
+        return []
+    return None

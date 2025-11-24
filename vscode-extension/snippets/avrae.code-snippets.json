@@ -1,0 +1,23 @@
+{
+  "Draconic Wrapper": {
+    "prefix": [
+      "drac2",
+      "draconic-block"
+    ],
+    "body": [
+      "<drac2>",
+      "$TM_SELECTED_TEXT$0",
+      "</drac2>"
+    ],
+    "description": "Wrap the current selection in a <drac2> block."
+  },
+  "Using Import Stub": {
+    "prefix": [
+      "using"
+    ],
+    "body": [
+      "using(${1:alias}=\"${2:gvar-id}\")"
+    ],
+    "description": "Insert a using() stub that points at a gvar."
+  }
+}

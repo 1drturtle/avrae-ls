@@ -56,16 +56,16 @@ async def test_preview_argument_parsing(tmp_path):
 
 def test_simulate_command_accepts_embed():
     payload = '-title "Hello"'
-    preview, name, validation = simulate_command(f"embed {payload}")
-    assert name == "embed"
-    assert preview == payload
-    assert validation is None
+    simulated = simulate_command(f"embed {payload}")
+    assert simulated.command_name == "embed"
+    assert simulated.preview == payload
+    assert simulated.validation_error is None
 
 
 def test_simulate_command_embeds_validate_unknown_keys():
     payload = "-foo 1"
-    _preview, _name, validation = simulate_command(f"embed {payload}")
-    assert validation
+    simulated = simulate_command(f"embed {payload}")
+    assert simulated.validation_error
     ok, err = validate_embed_payload(payload)
     assert not ok
     assert "unknown flag" in err
@@ -94,3 +94,57 @@ def test_validate_embed_field_format():
     ok, err = validate_embed_payload('-f "BadField"')
     assert not ok
     assert "field must be" in err.lower()
+
+
+def test_simulate_command_returns_embed_preview():
+    payload = '-title "Hello" -desc "World" -color #ABCDEF -t 30 -thumb http://thumb -image http://image -footer "Footer" -f "Name|Value|inline"'
+    simulated = simulate_command(f"embed {payload}")
+    embed = simulated.embed
+    assert simulated.command_name == "embed"
+    assert simulated.validation_error is None
+    assert embed is not None
+    assert embed.title == "Hello"
+    assert embed.description == "World"
+    assert embed.color == "#ABCDEF"
+    assert embed.timeout == 30
+    assert embed.thumbnail == "http://thumb"
+    assert embed.image == "http://image"
+    assert embed.footer == "Footer"
+    assert embed.fields and embed.fields[0].name == "Name" and embed.fields[0].inline
+
+
+def test_simulate_command_detects_embed_without_keyword():
+    payload = '-title abc -desc def -f "A|B|inline"'
+    simulated = simulate_command(payload)
+    assert simulated.command_name == "embed"
+    assert simulated.preview == payload
+    assert simulated.embed is not None
+
+
+def test_simulate_command_with_embed_prefix_and_payload_on_newline():
+    payload = "-title abc"
+    simulated = simulate_command(f"embed\n{payload}")
+    assert simulated.command_name == "embed"
+    assert simulated.preview.strip() == payload
+
+
+def test_simulate_command_finds_embed_after_intro_text():
+    payload = "-title abc"
+    simulated = simulate_command(f"# heading\nembed {payload}")
+    assert simulated.command_name == "embed"
+    assert simulated.preview.strip().endswith(payload)
+
+
+def test_simulate_command_supports_multiple_flag_lines():
+    payload = "-title abc\n-title def"
+    simulated = simulate_command(payload)
+    assert simulated.command_name == "embed"
+    assert "-title abc" in simulated.preview
+    assert "-title def" in simulated.preview
+
+
+def test_simulate_command_strips_alias_header():
+    alias = "!alias next embed\n-title \"Done?\""
+    simulated = simulate_command(alias)
+    assert simulated.command_name == "embed"
+    assert "Done?" in simulated.preview

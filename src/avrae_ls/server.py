@@ -18,6 +18,7 @@ from .alias_preview import render_alias_command, simulate_command
 from .parser import find_draconic_blocks
 from .signature_help import load_signatures, signature_help_for_code
 from .completions import gather_suggestions, completion_items_for_position, hover_for_position
+from .code_actions import code_actions_for_document
 from .symbols import build_symbol_table, document_symbols, find_definition_range, find_references, range_for_word
 from .argument_parsing import apply_argument_parsing
 
@@ -260,6 +261,12 @@ def on_hover(server: AvraeLanguageServer, params: types.HoverParams):
     return None
 
 
+@ls.feature(types.TEXT_DOCUMENT_CODE_ACTION)
+def on_code_action(server: AvraeLanguageServer, params: types.CodeActionParams):
+    doc = server.workspace.get_text_document(params.text_document.uri)
+    return code_actions_for_document(doc.source, params, server.workspace_root)
+
+
 @ls.command(RUN_ALIAS_COMMAND)
 async def run_alias(server: AvraeLanguageServer, *args: Any):
     payload = args[0] if args else {}
@@ -289,18 +296,20 @@ async def run_alias(server: AvraeLanguageServer, *args: Any):
         server.state.context_builder.gvar_resolver,
         args=alias_args,
     )
-    preview_output, command_name, validation_error = simulate_command(rendered.command)
+    preview = simulate_command(rendered.command)
 
     response: dict[str, Any] = {
         "stdout": rendered.stdout,
-        "result": preview_output if preview_output is not None else rendered.last_value,
+        "result": preview.preview if preview.preview is not None else rendered.last_value,
         "command": rendered.command,
-        "commandName": command_name,
+        "commandName": preview.command_name,
     }
     if rendered.error:
         response["error"] = _format_runtime_error(rendered.error)
-    if validation_error:
-        response["validationError"] = validation_error
+    if preview.validation_error:
+        response["validationError"] = preview.validation_error
+    if preview.embed:
+        response["embed"] = preview.embed.to_dict()
     if uri:
         extra = []
         if rendered.error:

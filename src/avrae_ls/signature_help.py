@@ -157,15 +157,29 @@ def signature_help_for_code(code: str, line: int, character: int, sigs: Dict[str
         return None
 
     target_call: ast.Call | None = None
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
+    target_depth = -1
+
+    class Finder(ast.NodeVisitor):
+        def __init__(self):
+            self.stack: list[ast.AST] = []
+
+        def visit_Call(self, node: ast.Call):
+            nonlocal target_call, target_depth
             if hasattr(node, "lineno") and hasattr(node, "col_offset"):
                 start = (node.lineno - 1, node.col_offset)
                 end_line = getattr(node, "end_lineno", node.lineno) - 1
                 end_col = getattr(node, "end_col_offset", node.col_offset)
                 if _pos_within((line, character), start, (end_line, end_col)):
-                    target_call = node
-                    break
+                    depth = len(self.stack)
+                    # Prefer the most nested call covering the cursor
+                    if depth >= target_depth:
+                        target_call = node
+                        target_depth = depth
+            self.stack.append(node)
+            self.generic_visit(node)
+            self.stack.pop()
+
+    Finder().visit(tree)
 
     if not target_call:
         return None
@@ -184,7 +198,7 @@ def signature_help_for_code(code: str, line: int, character: int, sigs: Dict[str
         documentation=fsig.doc,
         parameters=[types.ParameterInformation(label=p) for p in fsig.params],
     )
-    active_param = min(len(target_call.args), max(len(fsig.params) - 1, 0))
+    active_param = _active_param_index(target_call, (line, character), fsig.params)
     return types.SignatureHelp(signatures=[sig_info], active_signature=0, active_parameter=active_param)
 
 
@@ -199,3 +213,40 @@ def _pos_within(pos: Tuple[int, int], start: Tuple[int, int], end: Tuple[int, in
     if line == el and col > ec:
         return False
     return True
+
+
+def _active_param_index(call: ast.Call, cursor: Tuple[int, int], params: List[str]) -> int:
+    if not params:
+        return 0
+
+    # Build spans for positional args and keywords in source order.
+    spans: list[tuple[Tuple[int, int], Tuple[int, int], ast.AST]] = []
+    for arg in call.args:
+        spans.append((_node_start(arg), _node_end(arg), arg))
+    for kw in call.keywords:
+        spans.append((_node_start(kw), _node_end(kw), kw))
+    spans.sort(key=lambda s: (s[0][0], s[0][1]))
+
+    def _clamp(idx: int) -> int:
+        return max(0, min(idx, max(len(params) - 1, 0)))
+
+    for idx, (start, end, node) in enumerate(spans):
+        if _pos_within(cursor, start, end):
+            if isinstance(node, ast.keyword) and node.arg and node.arg in params:
+                return _clamp(params.index(node.arg))
+            return _clamp(idx)
+
+    # If cursor is after some args but not inside one, infer next argument slot.
+    before_count = sum(1 for start, _, _ in spans if start <= cursor)
+    return _clamp(before_count)
+
+
+def _node_start(node: ast.AST) -> Tuple[int, int]:
+    return (getattr(node, "lineno", 1) - 1, getattr(node, "col_offset", 0))
+
+
+def _node_end(node: ast.AST) -> Tuple[int, int]:
+    return (
+        getattr(node, "end_lineno", getattr(node, "lineno", 1)) - 1,
+        getattr(node, "end_col_offset", getattr(node, "col_offset", 0)),
+    )

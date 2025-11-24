@@ -184,12 +184,13 @@ function activate(context) {
     const renderedCommand = result.command
       ? `<pre class="code-block">${escapeHtml(result.command)}</pre>`
       : `<div class="empty">No command captured</div>`;
-    const canPreview =
-      result.result && (result.commandName === "echo" || result.commandName === "embed");
-    const previewLabel = result.commandName === "embed" ? "Embed" : "Preview";
-    const renderedPreview = canPreview
-      ? `<pre class="code-block">${escapeHtml(String(result.result))}</pre>`
-      : `<div class="empty">Nothing to preview</div>`;
+    const isEmbed = result.commandName === "embed";
+    const embedPreview = isEmbed ? renderEmbedPreview(result.embed, result.result) : "";
+    const renderedPreview = isEmbed
+      ? (embedPreview || `<div class="empty">Embed preview unavailable</div>`)
+      : result.result !== undefined
+        ? `<pre class="code-block">${escapeHtml(String(result.result))}</pre>`
+        : `<div class="empty">Nothing to preview</div>`;
 
     previewPanel.webview.html = `<!DOCTYPE html>
 <html>
@@ -215,6 +216,23 @@ pre { white-space: pre-wrap; word-break: break-word; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 .empty { color: var(--vscode-descriptionForeground); padding: 6px 0; }
+.embed-card { border: 1px solid var(--vscode-editorWidget-border); border-radius: 6px; background: var(--vscode-editorWidget-background); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.embed-top { display: flex; gap: 10px; align-items: flex-start; }
+.embed-main { flex: 1; }
+.embed-title { margin: 0 0 6px 0; font-size: 1.4em; }
+.embed-desc { margin: 4px 0 8px 0; }
+.embed-fields { display: flex; flex-direction: column; gap: 8px; }
+.embed-field { border: 1px solid var(--vscode-editorWidget-border); border-radius: 4px; padding: 8px; background: var(--vscode-editor-background); }
+.embed-field.inline { border-style: dashed; }
+.embed-field h4 { margin: 0 0 4px 0; }
+.embed-field-value { white-space: pre-wrap; }
+.embed-thumb { max-width: 96px; border-radius: 4px; border: 1px solid var(--vscode-editorWidget-border); }
+.embed-image { text-align: center; }
+.embed-image img { max-width: 100%; border-radius: 4px; border: 1px solid var(--vscode-editorWidget-border); }
+.embed-footer { margin-top: 8px; opacity: 0.9; }
+.embed-flags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.embed-flag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; background: var(--vscode-editor-background); border: 1px solid var(--vscode-editorWidget-border); font-size: 0.9em; }
+.embed-color-chip { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--vscode-editorWidget-border); display: inline-block; }
 </style>
 </head>
 <body>
@@ -277,6 +295,74 @@ pre { white-space: pre-wrap; word-break: break-word; }
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  function renderEmbedPreview(embed, rawResult) {
+    if (!embed && !rawResult) return "";
+    if (!embed) {
+      return `<pre class="code-block">${escapeHtml(String(rawResult))}</pre>`;
+    }
+    const fields = Array.isArray(embed.fields) && embed.fields.length
+      ? `<div class="embed-fields">${embed.fields.map((f) => `
+            <div class="embed-field ${f.inline ? "inline" : ""}">
+              <h4>${escapeHtml(f.name || "")}</h4>
+              <div class="embed-field-value">${renderMultiline(f.value || "")}</div>
+            </div>
+          `).join("")}</div>`
+      : "";
+    const thumb = embed.thumbnail
+      ? `<img class="embed-thumb" src="${escapeHtml(embed.thumbnail)}" alt="Embed thumbnail" />`
+      : "";
+    const image = embed.image
+      ? `<div class="embed-image"><img src="${escapeHtml(embed.image)}" alt="Embed image" /></div>`
+      : "";
+    const flags = [];
+    if (embed.color) {
+      const colorChip = sanitizeColor(embed.color);
+      flags.push(`<div class="embed-flag">Color: ${colorChip ? `<span class="embed-color-chip" style="background:${colorChip}"></span>` : ""}${escapeHtml(embed.color)}</div>`);
+    }
+    if (embed.timeout !== undefined && embed.timeout !== null) {
+      flags.push(`<div class="embed-flag">Timeout: ${escapeHtml(String(embed.timeout))}s</div>`);
+    }
+    if (embed.thumbnail) {
+      flags.push(`<div class="embed-flag">Thumbnail set</div>`);
+    }
+    if (embed.image) {
+      flags.push(`<div class="embed-flag">Image set</div>`);
+    }
+    const flagRow = flags.length ? flags.join("") : "";
+    const payloadNote = rawResult ? `<div class="embed-flag">Payload: ${escapeHtml(String(rawResult))}</div>` : "";
+    return `
+      <div>
+        <div class="embed-card">
+          <div class="embed-top">
+            <div class="embed-main">
+              ${embed.title ? `<h1 class="embed-title">${escapeHtml(embed.title)}</h1>` : ""}
+              ${embed.description ? `<div class="embed-desc">${renderMultiline(embed.description)}</div>` : ""}
+              ${fields}
+              ${embed.footer ? `<div class="embed-footer">${escapeHtml(embed.footer)}</div>` : ""}
+              ${flagRow ? `<div class="embed-flags">${flagRow}</div>` : ""}
+            </div>
+            ${thumb}
+          </div>
+          ${image}
+        </div>
+        ${payloadNote ? `<div class="embed-flags">${payloadNote}</div>` : ""}
+      </div>
+    `;
+  }
+
+  function renderMultiline(text) {
+    return escapeHtml(String(text)).replace(/\n/g, "<br/>");
+  }
+
+  function sanitizeColor(color) {
+    if (!color) return null;
+    const match = String(color).match(/^(?:#|0x)?([0-9a-fA-F]{6})$/);
+    if (match) {
+      return `#${match[1]}`;
+    }
+    return null;
   }
 
   function parseArgs(input) {

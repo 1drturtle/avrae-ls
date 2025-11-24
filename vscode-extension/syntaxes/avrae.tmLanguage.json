@@ -4,7 +4,7 @@
   "patterns": [
     {
       "name": "meta.command.avrae",
-      "match": "^!alias\\b.*$"
+      "match": "^!alias\\b[^<\\n]*"
     },
     {
       "name": "meta.embedded.draconic",

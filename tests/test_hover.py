@@ -45,6 +45,23 @@ def test_hover_handles_attribute_inside_call():
     assert "character().attacks" in hover.contents.value
 
 
+@pytest.mark.parametrize(
+    ("code", "needle", "expected"),
+    [
+        ("character().coinpurse.pp", "pp", "Platinum"),
+        ("character().resistances.resist", "resist", "resist"),
+        ("character().spellbook.dc", "dc", "Save DC"),
+    ],
+)
+def test_hover_populates_missing_property_docs(code: str, needle: str, expected: str):
+    ctx_data = ContextData()
+    resolver = GVarResolver(AvraeLSConfig.default(Path(".")))
+    hover = hover_for_position(code, 0, code.index(needle) + 1, {}, ctx_data, resolver)
+    assert hover is not None
+    text = hover.contents.value
+    assert expected in text
+
+
 def test_hover_shows_function_signature_and_doc():
     ctx_data = ContextData()
     resolver = GVarResolver(AvraeLSConfig.default(Path(".")))

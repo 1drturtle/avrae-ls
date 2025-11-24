@@ -124,7 +124,9 @@ TYPE_MAP: Dict[str, object] = {
     "attacks": AliasAttackList,
     "attack": AliasAttack,
     "skills": AliasSkills,
+    "AliasSkills": AliasSkills,
     "skill": AliasSkill,
+    "AliasSkill": AliasSkill,
     "saves": AliasSaves,
     "resistances": AliasResistances,
     "coinpurse": AliasCoinpurse,
@@ -184,6 +186,226 @@ class TypeMeta:
     attrs: Dict[str, AttrMeta]
     methods: Dict[str, MethodMeta]
     element_type: str = ""
+
+
+_SKILL_DOCS: dict[str, str] = {
+    "acrobatics": "Acrobatics skill bonus.",
+    "animalHandling": "Animal Handling skill bonus.",
+    "arcana": "Arcana skill bonus.",
+    "athletics": "Athletics skill bonus.",
+    "deception": "Deception skill bonus.",
+    "history": "History skill bonus.",
+    "initiative": "Initiative modifier.",
+    "insight": "Insight skill bonus.",
+    "intimidation": "Intimidation skill bonus.",
+    "investigation": "Investigation skill bonus.",
+    "medicine": "Medicine skill bonus.",
+    "nature": "Nature skill bonus.",
+    "perception": "Perception skill bonus.",
+    "performance": "Performance skill bonus.",
+    "persuasion": "Persuasion skill bonus.",
+    "religion": "Religion skill bonus.",
+    "sleightOfHand": "Sleight of Hand skill bonus.",
+    "stealth": "Stealth skill bonus.",
+    "survival": "Survival skill bonus.",
+    "strength": "Strength ability score for this skill block.",
+    "dexterity": "Dexterity ability score for this skill block.",
+    "constitution": "Constitution ability score for this skill block.",
+    "intelligence": "Intelligence ability score for this skill block.",
+    "wisdom": "Wisdom ability score for this skill block.",
+    "charisma": "Charisma ability score for this skill block.",
+}
+
+_COUNTER_DOCS: dict[str, str] = {
+    "name": "Internal name of the counter.",
+    "title": "Display title for the counter.",
+    "desc": "Description text for the counter.",
+    "value": "Current counter value.",
+    "max": "Maximum value for the counter.",
+    "min": "Minimum value for the counter.",
+    "reset_on": "Reset cadence for the counter (e.g., long/short rest).",
+    "display_type": "Display style for the counter.",
+    "reset_to": "Value to reset the counter to.",
+    "reset_by": "Increment applied when the counter resets.",
+}
+
+_EFFECT_DOCS: dict[str, str] = {
+    "name": "Effect name.",
+    "duration": "Configured duration for the effect.",
+    "remaining": "Remaining duration for the effect.",
+    "effect": "Raw effect payload.",
+    "attacks": "Attack data attached to the effect, if any.",
+    "buttons": "Buttons provided by the effect.",
+    "conc": "Whether the effect requires concentration.",
+    "desc": "Effect description text.",
+    "ticks_on_end": "Whether the effect ticks when it ends.",
+    "combatant_name": "Name of the owning combatant.",
+    "parent": "Parent effect, if nested.",
+    "children": "Child effects nested under this effect.",
+}
+
+_ATTR_DOC_OVERRIDES: dict[str, dict[str, str]] = {
+    "SimpleRollResult": {
+        "dice": "Markdown representation of the dice that were rolled.",
+        "total": "Numeric total of the resolved roll.",
+        "full": "Rendered roll result string.",
+        "result": "Underlying d20 RollResult object.",
+        "raw": "Original d20 expression for the roll.",
+    },
+    "stats": {
+        "prof_bonus": "Proficiency bonus for the character.",
+        "strength": "Strength ability score.",
+        "dexterity": "Dexterity ability score.",
+        "constitution": "Constitution ability score.",
+        "intelligence": "Intelligence ability score.",
+        "wisdom": "Wisdom ability score.",
+        "charisma": "Charisma ability score.",
+    },
+    "AliasBaseStats": {
+        "prof_bonus": "Proficiency bonus for the character.",
+        "strength": "Strength ability score.",
+        "dexterity": "Dexterity ability score.",
+        "constitution": "Constitution ability score.",
+        "intelligence": "Intelligence ability score.",
+        "wisdom": "Wisdom ability score.",
+        "charisma": "Charisma ability score.",
+    },
+    "levels": {
+        "total_level": "Sum of all class levels.",
+    },
+    "AliasLevels": {
+        "total_level": "Sum of all class levels.",
+    },
+    "attack": {
+        "name": "Attack name.",
+        "verb": "Attack verb or action phrase.",
+        "proper": "Whether the attack name is treated as proper.",
+        "activation_type": "Activation type identifier for this attack.",
+        "raw": "Raw attack payload from the statblock.",
+    },
+    "AliasAttack": {
+        "name": "Attack name.",
+        "verb": "Attack verb or action phrase.",
+        "proper": "Whether the attack name is treated as proper.",
+        "activation_type": "Activation type identifier for this attack.",
+        "raw": "Raw attack payload from the statblock.",
+    },
+    "skills": _SKILL_DOCS,
+    "AliasSkills": _SKILL_DOCS,
+    "skill": {
+        "value": "Total modifier for the skill.",
+        "prof": "Proficiency value applied to the skill.",
+        "bonus": "Base bonus before rolling.",
+        "adv": "Advantage state for the skill roll (True/False/None).",
+    },
+    "AliasSkill": {
+        "value": "Total modifier for the skill.",
+        "prof": "Proficiency value applied to the skill.",
+        "bonus": "Base bonus before rolling.",
+        "adv": "Advantage state for the skill roll (True/False/None).",
+    },
+    "resistances": {
+        "resist": "Damage types resisted.",
+        "vuln": "Damage types this target is vulnerable to.",
+        "immune": "Damage types the target is immune to.",
+        "neutral": "Damage types with no modifiers.",
+    },
+    "AliasResistances": {
+        "resist": "Damage types resisted.",
+        "vuln": "Damage types this target is vulnerable to.",
+        "immune": "Damage types the target is immune to.",
+        "neutral": "Damage types with no modifiers.",
+    },
+    "coinpurse": {
+        "pp": "Platinum pieces carried.",
+        "gp": "Gold pieces carried.",
+        "ep": "Electrum pieces carried.",
+        "sp": "Silver pieces carried.",
+        "cp": "Copper pieces carried.",
+        "total": "Total value of all coins.",
+    },
+    "AliasCoinpurse": {
+        "pp": "Platinum pieces carried.",
+        "gp": "Gold pieces carried.",
+        "ep": "Electrum pieces carried.",
+        "sp": "Silver pieces carried.",
+        "cp": "Copper pieces carried.",
+        "total": "Total value of all coins.",
+    },
+    "custom_counter": _COUNTER_DOCS,
+    "consumable": _COUNTER_DOCS,
+    "AliasCustomCounter": _COUNTER_DOCS,
+    "death_saves": {
+        "successes": "Number of successful death saves.",
+        "fails": "Number of failed death saves.",
+    },
+    "AliasDeathSaves": {
+        "successes": "Number of successful death saves.",
+        "fails": "Number of failed death saves.",
+    },
+    "spellbook": {
+        "dc": "Save DC for spells in this spellbook.",
+        "sab": "Spell attack bonus for this spellbook.",
+        "caster_level": "Caster level used for the spellbook.",
+        "spell_mod": "Spellcasting ability modifier.",
+        "spells": "Spells grouped by level.",
+        "pact_slot_level": "Level of pact slots, if any.",
+        "num_pact_slots": "Number of pact slots available.",
+        "max_pact_slots": "Maximum pact slots available.",
+    },
+    "AliasSpellbook": {
+        "dc": "Save DC for spells in this spellbook.",
+        "sab": "Spell attack bonus for this spellbook.",
+        "caster_level": "Caster level used for the spellbook.",
+        "spell_mod": "Spellcasting ability modifier.",
+        "spells": "Spells grouped by level.",
+        "pact_slot_level": "Level of pact slots, if any.",
+        "num_pact_slots": "Number of pact slots available.",
+        "max_pact_slots": "Maximum pact slots available.",
+    },
+    "spell": {
+        "name": "Spell name.",
+        "dc": "Save DC for this spell.",
+        "sab": "Spell attack bonus for this spell.",
+        "mod": "Spellcasting modifier applied to the spell.",
+        "prepared": "Whether the spell is prepared/known.",
+    },
+    "AliasSpellbookSpell": {
+        "name": "Spell name.",
+        "dc": "Save DC for this spell.",
+        "sab": "Spell attack bonus for this spell.",
+        "mod": "Spellcasting modifier applied to the spell.",
+        "prepared": "Whether the spell is prepared/known.",
+    },
+    "guild": {
+        "name": "Guild (server) name.",
+        "id": "Guild (server) id.",
+    },
+    "channel": {
+        "name": "Channel name.",
+        "id": "Channel id.",
+        "topic": "Channel topic, if set.",
+        "category": "Parent category for the channel.",
+        "parent": "Parent channel, if present.",
+    },
+    "category": {
+        "name": "Category name.",
+        "id": "Category id.",
+    },
+    "author": {
+        "name": "User name for the invoking author.",
+        "id": "User id for the invoking author.",
+        "discriminator": "User discriminator/tag.",
+        "display_name": "Display name for the author.",
+        "roles": "Roles held by the author.",
+    },
+    "role": {
+        "name": "Role name.",
+        "id": "Role id.",
+    },
+    "effect": _EFFECT_DOCS,
+    "SimpleEffect": _EFFECT_DOCS,
+}
 
 
 def gather_suggestions(
@@ -461,98 +683,257 @@ def _infer_type_map(code: str) -> Dict[str, str]:
         tree = ast.parse(code)
     except SyntaxError:
         return {}
-    type_map: dict[str, str] = {}
+    visitor = _TypeInferencer(code)
+    visitor.visit(tree)
+    return visitor.type_map
 
-    class Visitor(ast.NodeVisitor):
-        def visit_Assign(self, node: ast.Assign):
-            val_type, elem_type = self._value_type(node.value)
-            for target in node.targets:
-                if not isinstance(target, ast.Name):
-                    continue
-                if val_type:
-                    type_map[target.id] = val_type
-                if elem_type:
-                    type_map[f"{target.id}.__element__"] = elem_type
-                self._record_dict_key_types(target.id, node.value)
-            self.generic_visit(node)
 
-        def visit_For(self, node: ast.For):
-            iter_type, elem_type = self._value_type(node.iter)
-            if not elem_type and isinstance(node.iter, ast.Name):
-                elem_type = type_map.get(f"{node.iter.id}.__element__")
-            if elem_type and isinstance(node.target, ast.Name):
-                type_map[node.target.id] = elem_type
-            self.generic_visit(node)
+class _TypeInferencer(ast.NodeVisitor):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        self.type_map: dict[str, str] = {}
 
-        def visit_AnnAssign(self, node: ast.AnnAssign):
-            val_type, elem_type = self._value_type(node.value) if node.value else (None, None)
-            if isinstance(node.target, ast.Name):
-                if val_type:
-                    type_map[node.target.id] = val_type
-                if elem_type:
-                    type_map[f"{node.target.id}.__element__"] = elem_type
-                self._record_dict_key_types(node.target.id, node.value)
-            self.generic_visit(node)
+    def visit_Assign(self, node: ast.Assign):
+        val_type, elem_type = self._value_type(node.value)
+        for target in node.targets:
+            self._bind_target(target, val_type, elem_type, node.value)
+        self.generic_visit(node)
 
-        def _value_type(self, value: ast.AST | None) -> tuple[Optional[str], Optional[str]]:
-            if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
+    def visit_AnnAssign(self, node: ast.AnnAssign):
+        val_type, elem_type = self._value_type(node.value) if node.value else (None, None)
+        self._bind_target(node.target, val_type, elem_type, node.value)
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign):
+        val_type, elem_type = self._value_type(node.value)
+        self._bind_target(
+            node.target,
+            val_type or self._existing_type(node.target),
+            elem_type or self._existing_element(node.target),
+            None,
+        )
+        self.generic_visit(node)
+
+    def visit_For(self, node: ast.For):
+        _, elem_type = self._value_type(node.iter)
+        if not elem_type and isinstance(node.iter, ast.Name):
+            elem_type = self.type_map.get(f"{node.iter.id}.__element__")
+        self._bind_target(node.target, elem_type, None, None)
+        self.generic_visit(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor):
+        _, elem_type = self._value_type(node.iter)
+        if not elem_type and isinstance(node.iter, ast.Name):
+            elem_type = self.type_map.get(f"{node.iter.id}.__element__")
+        self._bind_target(node.target, elem_type, None, None)
+        self.generic_visit(node)
+
+    def visit_If(self, node: ast.If):
+        self.visit(node.test)
+        base_map = self.type_map.copy()
+        body_map = self._visit_block(node.body, base_map.copy())
+        orelse_seed = base_map.copy()
+        orelse_map = self._visit_block(node.orelse, orelse_seed) if node.orelse else orelse_seed
+        self.type_map = self._merge_branch_types(base_map, body_map, orelse_map)
+
+    def _visit_block(self, nodes: Iterable[ast.stmt], seed: dict[str, str]) -> dict[str, str]:
+        walker = _TypeInferencer(self.code)
+        walker.type_map = seed
+        for stmt in nodes:
+            walker.visit(stmt)
+        return walker.type_map
+
+    def _merge_branch_types(self, base: dict[str, str], left: dict[str, str], right: dict[str, str]) -> dict[str, str]:
+        merged = base.copy()
+        for key in set(left) | set(right):
+            l_val = left.get(key)
+            r_val = right.get(key)
+            if l_val and r_val and l_val == r_val:
+                merged[key] = l_val
+            elif key in base:
+                merged[key] = base[key]
+            elif l_val and not r_val:
+                merged[key] = l_val
+            elif r_val and not l_val:
+                merged[key] = r_val
+            elif key in merged:
+                merged.pop(key, None)
+        return merged
+
+    def _bind_target(self, target: ast.AST, val_type: Optional[str], elem_type: Optional[str], source: ast.AST | None):
+        if isinstance(target, ast.Name):
+            if val_type:
+                self.type_map[target.id] = val_type
+            if elem_type:
+                self.type_map[f"{target.id}.__element__"] = elem_type
+            if source is not None:
+                self._record_dict_key_types(target.id, source)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                self._bind_target(elt, val_type, elem_type, source)
+
+    def _existing_type(self, target: ast.AST) -> Optional[str]:
+        if isinstance(target, ast.Name):
+            return self.type_map.get(target.id)
+        return None
+
+    def _existing_element(self, target: ast.AST) -> Optional[str]:
+        if isinstance(target, ast.Name):
+            return self.type_map.get(f"{target.id}.__element__")
+        return None
+
+    def _value_type(self, value: ast.AST | None) -> tuple[Optional[str], Optional[str]]:
+        if isinstance(value, ast.Call):
+            if isinstance(value.func, ast.Name):
                 if value.func.id in {"character", "combat"}:
                     return value.func.id, None
                 if value.func.id == "vroll":
                     return "SimpleRollResult", None
                 if value.func.id == "argparse":
                     return "ParsedArguments", None
+                if value.func.id == "range":
+                    return "range", "int"
                 if value.func.id in {"list", "dict", "str"}:
                     return value.func.id, None
-            if isinstance(value, ast.List):
-                return "list", None
-            if isinstance(value, ast.Dict):
-                return "dict", None
-            if isinstance(value, ast.Constant):
-                if isinstance(value.value, str):
-                    return "str", None
-            if isinstance(value, ast.Name):
-                if value.id in type_map:
-                    return type_map[value.id], type_map.get(f"{value.id}.__element__")
-                if value.id in {"character", "combat", "ctx"}:
-                    return value.id, None
-            if isinstance(value, ast.Attribute):
-                attr_name = value.attr
-                base_type = None
-                base_elem = None
-                if isinstance(value.value, ast.Name):
-                    base_type = type_map.get(value.value.id)
-                    base_elem = type_map.get(f"{value.value.id}.__element__")
-                if base_type is None:
-                    base_type, base_elem = self._value_type(value.value)
-                if base_type:
-                    meta = _type_meta(base_type)
-                    attr_meta = meta.attrs.get(attr_name)
-                    if attr_meta:
-                        if attr_meta.type_name:
-                            return attr_meta.type_name, attr_meta.element_type or None
-                        if attr_meta.element_type:
-                            return base_type, attr_meta.element_type
+            if isinstance(value.func, ast.Attribute):
+                base_type, base_elem = self._value_type(value.func.value)
+                if value.func.attr == "get" and value.args:
+                    key_literal = self._literal_key(value.args[0])
+                    val_type, elem_type = self._subscript_type(value.func.value, key_literal, base_type, base_elem)
+                    if val_type:
+                        return val_type, elem_type
                     if base_elem:
                         return base_elem, None
-                    if attr_name in TYPE_MAP:
-                        return attr_name, None
-                return None, None
+        if isinstance(value, ast.List):
+            elem_type, _ = self._iterable_element_from_values(value.elts)
+            return "list", elem_type
+        if isinstance(value, ast.Tuple):
+            elem_type, _ = self._iterable_element_from_values(getattr(value, "elts", []))
+            return "tuple", elem_type
+        if isinstance(value, ast.Set):
+            elem_type, _ = self._iterable_element_from_values(getattr(value, "elts", []))
+            return "set", elem_type
+        if isinstance(value, ast.ListComp):
+            comp_type, comp_elem = self._value_type(value.elt)
+            return "list", comp_type or comp_elem
+        if isinstance(value, ast.Dict):
+            elem_type, _ = self._iterable_element_from_values(value.values or [])
+            return "dict", elem_type
+        if isinstance(value, ast.Subscript):
+            return self._subscript_value_type(value)
+        if isinstance(value, ast.Constant):
+            if isinstance(value.value, str):
+                return "str", None
+        if isinstance(value, ast.Name):
+            if value.id in self.type_map:
+                return self.type_map[value.id], self.type_map.get(f"{value.id}.__element__")
+            if value.id in {"character", "combat", "ctx"}:
+                return value.id, None
+        if isinstance(value, ast.Attribute):
+            attr_name = value.attr
+            base_type = None
+            base_elem = None
+            if isinstance(value.value, ast.Name):
+                base_type = self.type_map.get(value.value.id)
+                base_elem = self.type_map.get(f"{value.value.id}.__element__")
+            if base_type is None:
+                base_type, base_elem = self._value_type(value.value)
+            if base_type:
+                meta = _type_meta(base_type)
+                attr_meta = meta.attrs.get(attr_name)
+                if attr_meta:
+                    if attr_meta.type_name:
+                        return attr_meta.type_name, attr_meta.element_type or None
+                    if attr_meta.element_type:
+                        return base_type, attr_meta.element_type
+                if base_elem:
+                    return base_elem, None
+                if attr_name in TYPE_MAP:
+                    return attr_name, None
             return None, None
+        if isinstance(value, ast.IfExp):
+            t_type, t_elem = self._value_type(value.body)
+            e_type, e_elem = self._value_type(value.orelse)
+            if t_type and e_type and t_type == e_type:
+                merged_elem = t_elem or e_elem
+                if t_elem and e_elem and t_elem != e_elem:
+                    merged_elem = None
+                return t_type, merged_elem
+            return t_type or e_type, t_elem or e_elem
+        return None, None
 
-        def _record_dict_key_types(self, var_name: str, value: ast.AST | None) -> None:
-            if not isinstance(value, ast.Dict):
-                return
-            for key_node, val_node in zip(value.keys or [], value.values or []):
-                if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
-                    val_type, elem_type = self._value_type(val_node)
-                    if val_type:
-                        type_map[f"{var_name}.{key_node.value}"] = val_type
-                    if elem_type:
-                        type_map[f"{var_name}.{key_node.value}.__element__"] = elem_type
+    def _iterable_element_from_values(self, values: Iterable[ast.AST]) -> tuple[Optional[str], Optional[str]]:
+        elem_type: Optional[str] = None
+        nested_elem: Optional[str] = None
+        for node in values:
+            val_type, inner_elem = self._value_type(node)
+            if not val_type:
+                return None, None
+            if elem_type is None:
+                elem_type = val_type
+                nested_elem = inner_elem
+            elif elem_type != val_type:
+                return None, None
+            if inner_elem:
+                if nested_elem is None:
+                    nested_elem = inner_elem
+                elif nested_elem != inner_elem:
+                    nested_elem = None
+        return elem_type, nested_elem
 
-    Visitor().visit(tree)
-    return type_map
+    def _literal_key(self, node: ast.AST | None) -> str | int | None:
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (str, int)):
+                return node.value
+        if hasattr(ast, "Index") and isinstance(node, getattr(ast, "Index")):
+            return self._literal_key(getattr(node, "value", None))
+        return None
+
+    def _subscript_type(
+        self,
+        base_expr: ast.AST,
+        key_literal: str | int | None,
+        base_type: Optional[str],
+        base_elem: Optional[str],
+    ) -> tuple[Optional[str], Optional[str]]:
+        base_name = base_expr.id if isinstance(base_expr, ast.Name) else None
+        if base_name and key_literal is not None:
+            dict_key = f"{base_name}.{key_literal}"
+            if dict_key in self.type_map:
+                return self.type_map[dict_key], self.type_map.get(f"{dict_key}.__element__")
+        elem_hint = base_elem
+        if base_name and not elem_hint:
+            elem_hint = self.type_map.get(f"{base_name}.__element__")
+        if base_type:
+            meta = _type_meta(base_type)
+            if key_literal is not None and key_literal in meta.attrs:
+                attr_meta = meta.attrs[key_literal]
+                if attr_meta.type_name:
+                    return attr_meta.type_name, attr_meta.element_type or None
+                if attr_meta.element_type:
+                    return base_type, attr_meta.element_type
+            elem_hint = elem_hint or meta.element_type
+        if elem_hint:
+            return elem_hint, None
+        return base_type, None
+
+    def _subscript_value_type(self, node: ast.Subscript) -> tuple[Optional[str], Optional[str]]:
+        base_type, base_elem = self._value_type(node.value)
+        key_literal = self._literal_key(getattr(node, "slice", None))
+        return self._subscript_type(node.value, key_literal, base_type, base_elem)
+
+    def _record_dict_key_types(self, var_name: str, value: ast.AST | None) -> None:
+        if not isinstance(value, ast.Dict):
+            return
+        for key_node, val_node in zip(value.keys or [], value.values or []):
+            key_literal = self._literal_key(key_node)
+            if key_literal is None:
+                continue
+            val_type, elem_type = self._value_type(val_node)
+            if val_type:
+                self.type_map[f"{var_name}.{key_literal}"] = val_type
+            if elem_type:
+                self.type_map[f"{var_name}.{key_literal}.__element__"] = elem_type
 
 
 def _resolve_type_name(receiver: str, code: str, type_map: Dict[str, str] | None = None) -> str:
@@ -619,10 +1000,22 @@ def _type_meta_map() -> Dict[str, TypeMeta]:
             return ""
         return _element_type_from_iterable(cls, reverse_type_map)
 
+    def _getitem_element_for_type_name(type_name: str) -> str:
+        cls = TYPE_MAP.get(type_name)
+        if not cls:
+            return ""
+        return _element_type_from_getitem(cls, reverse_type_map)
+
     for type_name, cls in TYPE_MAP.items():
         attrs: dict[str, AttrMeta] = {}
         methods: dict[str, MethodMeta] = {}
         iterable_element = _iter_element_for_type_name(type_name)
+        getitem_element = _getitem_element_for_type_name(type_name)
+        element_hint = iterable_element or getitem_element
+        override_docs = {
+            **_ATTR_DOC_OVERRIDES.get(type_name, {}),
+            **_ATTR_DOC_OVERRIDES.get(cls.__name__, {}),
+        }
 
         for attr in getattr(cls, "ATTRS", []):
             doc = ""
@@ -641,8 +1034,12 @@ def _type_meta_map() -> Dict[str, TypeMeta]:
             if not type_name_hint and not element_type_hint:
                 ann = _class_annotation(cls, attr)
                 type_name_hint, element_type_hint = _type_names_from_annotation(ann, reverse_type_map)
+            if not type_name_hint and element_hint:
+                type_name_hint = element_hint
             if type_name_hint and not element_type_hint:
                 element_type_hint = _iter_element_for_type_name(type_name_hint)
+            if not doc:
+                doc = override_docs.get(attr, doc)
             attrs[attr] = AttrMeta(doc=doc, type_name=type_name_hint, element_type=element_type_hint)
 
         for meth in getattr(cls, "METHODS", []):
@@ -657,7 +1054,7 @@ def _type_meta_map() -> Dict[str, TypeMeta]:
                 doc = (meth_obj.__doc__ or "").strip()
             methods[meth] = MethodMeta(signature=sig_label, doc=doc)
 
-        meta[type_name] = TypeMeta(attrs=attrs, methods=methods, element_type=iterable_element)
+        meta[type_name] = TypeMeta(attrs=attrs, methods=methods, element_type=element_hint)
     return meta
 
 
@@ -735,6 +1132,16 @@ def _element_type_from_iterable(cls: type, reverse_type_map: Dict[type, str]) ->
         ret_ann = hints.get("return")
         _, elem = _type_names_from_annotation(ret_ann, reverse_type_map)
         return elem
+    except Exception:
+        return ""
+
+
+def _element_type_from_getitem(cls: type, reverse_type_map: Dict[type, str]) -> str:
+    try:
+        hints = typing.get_type_hints(cls.__getitem__, globalns=inspect.getmodule(cls).__dict__, include_extras=False)
+        ret_ann = hints.get("return")
+        name, elem = _type_names_from_annotation(ret_ann, reverse_type_map)
+        return name or elem
     except Exception:
         return ""
 

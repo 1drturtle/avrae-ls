@@ -2,7 +2,7 @@
   "name": "avrae-ls-client",
   "displayName": "Avrae Draconic Alias Language Server",
   "description": "VS Code client for avrae-ls (draconic alias diagnostics and mock execution).",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -61,6 +61,12 @@
       {
         "command": "avrae-ls.showPreview",
         "title": "Avrae: Show Alias Preview"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "avrae",
+        "path": "./snippets/avrae.code-snippets.json"
       }
     ],
     "configuration": {

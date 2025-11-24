@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import shlex
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Optional, Tuple
 
 from .parser import DRACONIC_RE
@@ -17,6 +17,45 @@ class RenderedAlias:
     stdout: str
     error: Optional[BaseException]
     last_value: Any | None = None
+
+
+@dataclass
+class EmbedFieldPreview:
+    name: str
+    value: str
+    inline: bool = False
+
+
+@dataclass
+class EmbedPreview:
+    title: str | None = None
+    description: str | None = None
+    footer: str | None = None
+    thumbnail: str | None = None
+    image: str | None = None
+    color: str | None = None
+    timeout: int | None = None
+    fields: list[EmbedFieldPreview] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "title": self.title,
+            "description": self.description,
+            "footer": self.footer,
+            "thumbnail": self.thumbnail,
+            "image": self.image,
+            "color": self.color,
+            "timeout": self.timeout,
+            "fields": [asdict(f) for f in self.fields],
+        }
+
+
+@dataclass
+class SimulatedCommand:
+    preview: str | None
+    command_name: str | None
+    validation_error: str | None
+    embed: EmbedPreview | None = None
 
 
 def _strip_alias_header(text: str) -> str:
@@ -80,6 +119,58 @@ def validate_embed_payload(payload: str) -> Tuple[bool, str | None]:
         return False, "Embed payload is empty."
 
     return _validate_embed_flags(text)
+
+
+def parse_embed_payload(payload: str) -> EmbedPreview:
+    """Parse an embed payload into a structured preview object."""
+    tokens = shlex.split(payload.strip())
+    preview = EmbedPreview()
+
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if not tok.startswith("-"):
+            i += 1
+            continue
+        key = tok.lower()
+        next_val = tokens[i + 1] if i + 1 < len(tokens) else None
+        if key == "-title":
+            preview.title = next_val or ""
+            i += 2
+            continue
+        if key == "-desc":
+            preview.description = next_val or ""
+            i += 2
+            continue
+        if key == "-footer":
+            preview.footer = next_val or ""
+            i += 2
+            continue
+        if key == "-thumb":
+            preview.thumbnail = next_val or ""
+            i += 2
+            continue
+        if key == "-image":
+            preview.image = next_val or ""
+            i += 2
+            continue
+        if key == "-color":
+            preview.color = _normalize_color(next_val)
+            i += 2 if next_val is not None else 1
+            continue
+        if key == "-t":
+            preview.timeout = _parse_timeout(next_val)
+            i += 2
+            continue
+        if key == "-f":
+            field = _parse_field_value(next_val)
+            if field:
+                preview.fields.append(field)
+            i += 2
+            continue
+        i += 1
+
+    return preview
 
 
 def _validate_embed_flags(text: str) -> Tuple[bool, str | None]:
@@ -164,17 +255,92 @@ def _validate_timeout_arg(value: str | None) -> Tuple[bool, str | None, int]:
     return True, None, consumed
 
 
-def simulate_command(command: str) -> tuple[str | None, str | None, str | None]:
+def _parse_timeout(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_color(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not value:
+        return None
+    match = re.match(r"^(?:#|0x)?([0-9a-fA-F]{6})$", value)
+    if not match:
+        return value
+    return f"#{match.group(1)}"
+
+
+def _parse_field_value(value: str | None) -> EmbedFieldPreview | None:
+    if value is None:
+        return None
+    parts = value.split("|")
+    if len(parts) < 2:
+        return None
+    inline_flag = parts[2].lower() == "inline" if len(parts) == 3 else False
+    return EmbedFieldPreview(name=parts[0], value=parts[1], inline=inline_flag)
+
+
+def simulate_command(command: str) -> SimulatedCommand:
     """Very small shim to preview common commands."""
-    text = command.strip()
+    text = _strip_alias_header(command).strip()
     if not text:
-        return None, None, None
-    head, *rest = text.split(maxsplit=1)
-    payload = rest[0] if rest else ""
+        return SimulatedCommand(None, None, None, None)
+    head, payload = _extract_command_head_and_payload(text)
+    if not head:
+        return SimulatedCommand(None, None, None, None)
     lowered = head.lower()
     if lowered == "echo":
-        return payload, "echo", None
+        return SimulatedCommand(payload, "echo", None, None)
     if lowered == "embed":
         valid, error = validate_embed_payload(payload)
-        return payload, "embed", error
-    return None, head, None
+        embed_preview = parse_embed_payload(payload) if valid else None
+        return SimulatedCommand(payload, "embed", error, embed_preview)
+    if head.startswith("-") and _is_embed_flag(head):
+        payload = text
+        valid, error = validate_embed_payload(payload)
+        embed_preview = parse_embed_payload(payload) if valid else None
+        return SimulatedCommand(payload, "embed", error, embed_preview)
+    return SimulatedCommand(None, head, None, None)
+
+
+def _extract_command_head_and_payload(text: str) -> tuple[str | None, str]:
+    """Prefer the first non-empty line; fall back to any embed line later."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return None, ""
+    head, payload = _split_head_and_payload_from_line(lines[0])
+    if _is_embed_flag(head):
+        # Treat the entire payload (including the head line) as embed flags so multiple lines are preserved.
+        return head, "\n".join(lines)
+    if head and head.lower() in ("embed", "echo"):
+        return head, _merge_payload(payload, lines[1:])
+    for idx, line in enumerate(lines[1:], start=1):
+        possible_head, possible_payload = _split_head_and_payload_from_line(line)
+        if possible_head and (possible_head.lower() == "embed" or _is_embed_flag(possible_head)):
+            return possible_head, _merge_payload(possible_payload, lines[idx + 1 :])
+    return head, _merge_payload(payload, lines[1:])
+
+
+def _split_head_and_payload_from_line(line: str) -> tuple[str | None, str]:
+    if not line:
+        return None, ""
+    parts = line.split(maxsplit=1)
+    head = parts[0]
+    payload = parts[1] if len(parts) > 1 else ""
+    return head, payload
+
+
+def _merge_payload(first_payload: str, trailing_lines: list[str]) -> str:
+    payload = first_payload
+    if trailing_lines:
+        payload = (payload + "\n" if payload else "") + "\n".join(trailing_lines)
+    return payload
+
+
+def _is_embed_flag(flag: str) -> bool:
+    return flag.lower() in {"-title", "-desc", "-thumb", "-image", "-footer", "-f", "-color", "-t"}
