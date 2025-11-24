@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
 
 [project]
 name = "avrae-ls"
@@ -9,7 +9,7 @@ description = "Language server for Avrae draconic aliases"
 authors = [
   { name = "1drturtle" }
 ]
-license-files = ["LICENSE"]
+license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -30,8 +30,13 @@ dev = [
 [project.scripts]
 avrae-ls = "avrae_ls.__main__:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/avrae_ls", "src/draconic"]
+
+[tool.hatch.build]
+include = [
+    "src/draconic/LICENSE",
+]
 
 [tool.ruff]
 line-length = 120
@@ -40,6 +45,3 @@ exclude = [
     "avrae",
     "src/draconic"
 ]
-
-[tool.setuptools.package-data]
-draconic = ["LICENSE"]
