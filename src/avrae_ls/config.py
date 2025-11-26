@@ -28,8 +28,6 @@ class DiagnosticSettings:
 class AvraeServiceConfig:
     base_url: str = "https://api.avrae.io"
     token: str | None = None
-    verify_timeout: float = 5.0
-    verify_retries: int = 0
 
 
 @dataclass
@@ -416,29 +414,9 @@ def load_config(workspace_root: Path) -> Tuple[AvraeLSConfig, Iterable[str]]:
     enable_gvar_fetch = bool(raw.get("enableGvarFetch", False))
 
     service_cfg = raw.get("avraeService") or {}
-    def _get_service_timeout(raw_timeout) -> float:
-        try:
-            timeout = float(raw_timeout)
-            if timeout > 0:
-                return timeout
-        except Exception:
-            pass
-        return AvraeServiceConfig.verify_timeout
-
-    def _get_service_retries(raw_retries) -> int:
-        try:
-            retries = int(raw_retries)
-            if retries >= 0:
-                return retries
-        except Exception:
-            pass
-        return AvraeServiceConfig.verify_retries
-
     service = AvraeServiceConfig(
         base_url=str(service_cfg.get("baseUrl") or AvraeServiceConfig.base_url),
         token=_coerce_optional_str(service_cfg.get("token")),
-        verify_timeout=_get_service_timeout(service_cfg.get("verifySignatureTimeout")),
-        verify_retries=_get_service_retries(service_cfg.get("verifySignatureRetries")),
     )
 
     diag_cfg = raw.get("diagnostics") or {}

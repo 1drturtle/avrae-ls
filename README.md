@@ -32,13 +32,13 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
 - Mock execution never writes back to Avrae: cvar/uvar/gvar mutations only live for the current run and reset before the next.
 - Network is limited to gvar fetches (when `enableGvarFetch` is true) and `verify_signature`; other Avrae/Discord calls are replaced with mocked context data from `.avraels.json`.
 - `get_gvar`/`using` values are pulled from local var files first; remote fetches go to `https://api.avrae.io/customizations/gvars/<id>` (or your `avraeService.baseUrl`) using `avraeService.token` and are cached for the session.
-- `signature()` returns a mock string (`mock-signature:<int>`). `verify_signature()` POSTs to `/bot/signature/verify`, respects `verifySignatureTimeout`/`verifySignatureRetries`, reuses the last successful response per signature, and includes `avraeService.token` if present.
+- `signature()` returns a mock string (`mock-signature:<int>`). `verify_signature()` POSTs to `/bot/signature/verify`, reuses the last successful response per signature, and includes `avraeService.token` if present.
 
 ## Troubleshooting gvar fetch / verify_signature
 
 - `get_gvar` returns `None` or `using(...)` raises `ModuleNotFoundError`: ensure the workspace `.avraels.json` sets `enableGvarFetch: true`, includes a valid `avraeService.token`, or seed the gvar in a var file referenced by `varFiles`.
 - HTTP 401/403/404 from fetch/verify calls: check the token (401/403) and the gvar/signature id (404). Override `avraeService.baseUrl` if you mirror the API.
-- Slow or flaky calls: tune `verifySignatureTimeout` / `verifySignatureRetries`, or disable remote fetches by flipping `enableGvarFetch` off to rely purely on local vars.
+- Slow or flaky calls: disable remote fetches by flipping `enableGvarFetch` off to rely purely on local vars.
 
 ## Other editors (stdio)
 
@@ -59,7 +59,7 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
     :major-modes '(fundamental-mode)  ;; bind to your Avrae alias mode
     :server-id 'avrae-ls))
   ```
-- VS Code commands to mirror: `Avrae: Run Alias (Mock)`, `Avrae: Show Alias Preview`, and `Avrae: Reload Workspace Config` run against the same server binary.
+- VS Code commands to mirror: `Avrae: Run Alias (Mock)`, `Avrae: Show Alias Preview`, `Avrae: Refresh GVARs`, and `Avrae: Reload Workspace Config` run against the same server binary.
 
 ## Releasing (maintainers)
 

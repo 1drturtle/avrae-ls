@@ -35,7 +35,7 @@ class ContextBuilder:
         profile = self._select_profile(profile_name)
         combat = self._ensure_me_combatant(profile)
         merged_vars = self._merge_character_cvars(profile.character, self._load_var_files().merge(profile.vars))
-        self._gvar_resolver.seed(merged_vars.gvars)
+        self._gvar_resolver.reset(merged_vars.gvars)
         return ContextData(
             ctx=dict(profile.ctx),
             combat=combat,

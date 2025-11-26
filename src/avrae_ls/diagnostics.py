@@ -102,51 +102,76 @@ class DiagnosticProvider:
         diagnostics: list[types.Diagnostic] = []
 
         class Walker(ast.NodeVisitor):
-            def __init__(self, tracker: Set[str]):
-                self.tracker = tracker
+            def __init__(self, base_known: Set[str]):
+                self._base_known = base_known
+                self._scopes: list[Set[str]] = [set()]
+
+            @property
+            def _current(self) -> Set[str]:
+                return self._scopes[-1]
+
+            def _define(self, names: Iterable[str]) -> None:
+                self._current.update(names)
+
+            def _is_defined(self, name: str) -> bool:
+                if name in self._base_known:
+                    return True
+                return any(name in scope for scope in reversed(self._scopes))
 
             def visit_Assign(self, node: ast.Assign):
                 self.visit(node.value)
                 for target in node.targets:
-                    self.tracker.update(_names_in_target(target))
+                    self._define(_names_in_target(target))
 
             def visit_AnnAssign(self, node: ast.AnnAssign):
                 if node.value:
                     self.visit(node.value)
-                self.tracker.update(_names_in_target(node.target))
+                self._define(_names_in_target(node.target))
 
             def visit_AugAssign(self, node: ast.AugAssign):
                 self.visit(node.value)
-                self.tracker.update(_names_in_target(node.target))
+                self._define(_names_in_target(node.target))
 
             def visit_FunctionDef(self, node: ast.FunctionDef):
-                self.tracker.add(node.name)
-                for arg in node.args.args:
-                    self.tracker.add(arg.arg)
-                for stmt in node.body:
-                    self.visit(stmt)
+                self._define([node.name])
+                self._with_new_scope(self._bind_args, node.args, node.body)
+
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+                self._define([node.name])
+                self._with_new_scope(self._bind_args, node.args, node.body)
 
             def visit_ClassDef(self, node: ast.ClassDef):
-                self.tracker.add(node.name)
-                for stmt in node.body:
-                    self.visit(stmt)
+                self._define([node.name])
+                self._with_new_scope(lambda _: None, None, node.body)
 
             def visit_For(self, node: ast.For):
-                # Loop targets become defined for the loop body and after the loop
-                self.tracker.update(_names_in_target(node.target))
                 self.visit(node.iter)
+                self._define(_names_in_target(node.target))
                 for stmt in node.body:
                     self.visit(stmt)
                 for stmt in node.orelse:
                     self.visit(stmt)
 
             def visit_AsyncFor(self, node: ast.AsyncFor):
-                # Async loop targets follow the same scoping rules as regular loops
-                self.tracker.update(_names_in_target(node.target))
                 self.visit(node.iter)
+                self._define(_names_in_target(node.target))
                 for stmt in node.body:
                     self.visit(stmt)
                 for stmt in node.orelse:
+                    self.visit(stmt)
+
+            def visit_With(self, node: ast.With):
+                for item in node.items:
+                    if item.optional_vars:
+                        self._define(_names_in_target(item.optional_vars))
+                for stmt in node.body:
+                    self.visit(stmt)
+
+            def visit_AsyncWith(self, node: ast.AsyncWith):
+                for item in node.items:
+                    if item.optional_vars:
+                        self._define(_names_in_target(item.optional_vars))
+                for stmt in node.body:
                     self.visit(stmt)
 
             def visit_ListComp(self, node: ast.ListComp):
@@ -163,20 +188,20 @@ class DiagnosticProvider:
                 self._visit_comprehension(node.value, node.generators)
 
             def _visit_comprehension(self, expr: ast.AST, generators: list[ast.comprehension]):
-                """
-                Comprehension targets have their own scope; ensure they are treated as defined within
-                the comprehension body without leaking to outer scopes.
-                """
-                local_tracker = set(self.tracker)
-                for gen in generators:
-                    Walker(local_tracker).visit(gen.iter)
-                    local_tracker.update(_names_in_target(gen.target))
-                    for cond in gen.ifs:
-                        Walker(local_tracker).visit(cond)
-                Walker(local_tracker).visit(expr)
+                # Comprehensions run in their own scope; bindings should not leak out
+                self._scopes.append(set())
+                try:
+                    for gen in generators:
+                        self.visit(gen.iter)
+                        self._define(_names_in_target(gen.target))
+                        for cond in gen.ifs:
+                            self.visit(cond)
+                    self.visit(expr)
+                finally:
+                    self._scopes.pop()
 
             def visit_Name(self, node: ast.Name):
-                if isinstance(node.ctx, ast.Load) and node.id not in self.tracker:
+                if isinstance(node.ctx, ast.Load) and not self._is_defined(node.id):
                     diagnostics.append(
                         _make_diagnostic(
                             node,
@@ -191,8 +216,34 @@ class DiagnosticProvider:
                 if isinstance(node.func, ast.Name) and node.func.id == "using":
                     for kw in node.keywords:
                         if kw.arg:
-                            self.tracker.add(str(kw.arg))
+                            self._define([str(kw.arg)])
                 self.generic_visit(node)
+
+            def visit_NamedExpr(self, node: ast.NamedExpr):
+                self.visit(node.value)
+                self._define([node.target.id] if isinstance(node.target, ast.Name) else _names_in_target(node.target))
+
+            def _with_new_scope(self, binder, args, body: list[ast.stmt]):
+                self._scopes.append(set())
+                try:
+                    if binder and args is not None:
+                        binder(args)
+                    for stmt in body:
+                        self.visit(stmt)
+                finally:
+                    self._scopes.pop()
+
+            def _bind_args(self, args: ast.arguments):
+                for arg in getattr(args, "posonlyargs", []):
+                    self._define([arg.arg])
+                for arg in args.args:
+                    self._define([arg.arg])
+                if args.vararg:
+                    self._define([args.vararg.arg])
+                for arg in args.kwonlyargs:
+                    self._define([arg.arg])
+                if args.kwarg:
+                    self._define([args.kwarg.arg])
 
         walker = Walker(known)
         for stmt in body:

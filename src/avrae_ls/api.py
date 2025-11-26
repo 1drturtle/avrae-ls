@@ -1348,7 +1348,8 @@ class CharacterAPI(AliasStatBlock):
 
     def get_cvar(self, name: str, default: Any = None) -> Optional[str]:
         """Fetch a character variable, returning `default` if missing."""
-        val = self._data.setdefault("cvars", {}).get(str(name), default)
+        cvars = self._data.get("cvars") or {}
+        val = cvars.get(str(name), default)
         return str(val) if val is not None else default
 
     def set_cvar(self, name: str, val: str) -> Optional[str]:

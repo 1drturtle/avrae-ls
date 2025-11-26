@@ -27,6 +27,14 @@ def test_character_api_mock_schema():
     assert ch.spellbook.can_cast("Cure Wounds", 1)
 
 
+def test_get_cvar_does_not_mutate_character():
+    data: dict[str, object] = {}
+    ch = CharacterAPI(data)
+
+    assert ch.get_cvar("missing", default="fallback") == "fallback"
+    assert "cvars" not in data
+
+
 def test_combat_api_mock_schema():
     profile = _profile()
     cmb = CombatAPI(profile.combat)

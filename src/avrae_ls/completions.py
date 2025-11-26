@@ -567,7 +567,7 @@ def completion_items_for_position(
     if attr_ctx:
         receiver, attr_prefix = attr_ctx
         sanitized = _sanitize_incomplete_line(code, line, character)
-        type_map = _infer_type_map(sanitized)
+        type_map = _infer_type_map(sanitized, line)
         return _attribute_completions(receiver, attr_prefix, sanitized, type_map)
 
     line_text = _line_text_to_cursor(code, line, character)
@@ -631,7 +631,7 @@ def hover_for_position(
     resolver: GVarResolver,
 ) -> Optional[types.Hover]:
     line_text = _line_text(code, line)
-    type_map = _infer_type_map(code)
+    type_map = _infer_type_map(code, line)
     bindings = _infer_constant_bindings(code, line, ctx_data)
     attr_ctx = _attribute_receiver_and_prefix(code, line, character, capture_full_token=True)
     if attr_ctx:
@@ -836,24 +836,53 @@ def _annotation_types(node: ast.AST | None) -> tuple[Optional[str], Optional[str
     return None, None
 
 
-def _infer_receiver_type(code: str, name: str) -> Optional[str]:
-    return _infer_type_map(code).get(name)
+def _infer_receiver_type(code: str, name: str, line: int | None = None) -> Optional[str]:
+    return _infer_type_map(code, line).get(name)
 
 
-def _infer_type_map(code: str) -> Dict[str, str]:
+def _infer_type_map(code: str, line: int | None = None) -> Dict[str, str]:
     try:
         tree = ast.parse(code)
     except SyntaxError:
         return {}
     visitor = _TypeInferencer(code)
     visitor.visit(tree)
-    return visitor.type_map
+    return visitor.export_types(line)
 
 
 class _TypeInferencer(ast.NodeVisitor):
     def __init__(self, code: str) -> None:
         self.code = code
-        self.type_map: dict[str, str] = {}
+        self._scopes: list[dict[str, str]] = [dict()]
+        self._scoped_maps: list[tuple[tuple[int, int], dict[str, str]]] = []
+
+    def _current_scope(self) -> dict[str, str]:
+        return self._scopes[-1]
+
+    def _push_scope(self) -> None:
+        self._scopes.append(dict())
+
+    def _pop_scope(self) -> None:
+        self._scopes.pop()
+
+    def export_types(self, line: int | None = None) -> dict[str, str]:
+        if line is not None:
+            for (start, end), scope in reversed(self._scoped_maps):
+                if start <= line <= end:
+                    combined = dict(self._scopes[0])
+                    combined.update(scope)
+                    return combined
+        return dict(self._scopes[0])
+
+    def _set_type(self, key: str, value: Optional[str]) -> None:
+        if value:
+            self._current_scope()[key] = value
+
+    def _get_type(self, key: str) -> Optional[str]:
+        for scope in reversed(self._scopes):
+            if key in scope:
+                return scope[key]
+        return None
 
     def visit_Assign(self, node: ast.Assign):
         val_type, elem_type = self._value_type(node.value)
@@ -882,39 +911,61 @@ class _TypeInferencer(ast.NodeVisitor):
     def visit_For(self, node: ast.For):
         _, elem_type = self._value_type(node.iter)
         if not elem_type and isinstance(node.iter, ast.Name):
-            elem_type = self.type_map.get(f"{node.iter.id}.__element__")
+            elem_type = self._get_type(f"{node.iter.id}.__element__")
         self._bind_target(node.target, elem_type, None, None)
         self.generic_visit(node)
 
     def visit_AsyncFor(self, node: ast.AsyncFor):
         _, elem_type = self._value_type(node.iter)
         if not elem_type and isinstance(node.iter, ast.Name):
-            elem_type = self.type_map.get(f"{node.iter.id}.__element__")
+            elem_type = self._get_type(f"{node.iter.id}.__element__")
         self._bind_target(node.target, elem_type, None, None)
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
-        self._bind_function_args(node.args)
-        self.generic_visit(node)
+        self._push_scope()
+        try:
+            self._bind_function_args(node.args)
+            for stmt in node.body:
+                self.visit(stmt)
+            self._record_scope(node)
+        finally:
+            self._pop_scope()
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
-        self._bind_function_args(node.args)
-        self.generic_visit(node)
+        self._push_scope()
+        try:
+            self._bind_function_args(node.args)
+            for stmt in node.body:
+                self.visit(stmt)
+            self._record_scope(node)
+        finally:
+            self._pop_scope()
+
+    def visit_ClassDef(self, node: ast.ClassDef):
+        self._push_scope()
+        try:
+            for stmt in node.body:
+                self.visit(stmt)
+            self._record_scope(node)
+        finally:
+            self._pop_scope()
 
     def visit_If(self, node: ast.If):
         self.visit(node.test)
-        base_map = self.type_map.copy()
+        base_map = self._current_scope().copy()
         body_map = self._visit_block(node.body, base_map.copy())
         orelse_seed = base_map.copy()
         orelse_map = self._visit_block(node.orelse, orelse_seed) if node.orelse else orelse_seed
-        self.type_map = self._merge_branch_types(base_map, body_map, orelse_map)
+        self._current_scope().update(self._merge_branch_types(base_map, body_map, orelse_map))
 
     def _visit_block(self, nodes: Iterable[ast.stmt], seed: dict[str, str]) -> dict[str, str]:
         walker = _TypeInferencer(self.code)
-        walker.type_map = seed
+        walker._scopes = [seed.copy()]
         for stmt in nodes:
             walker.visit(stmt)
-        return walker.type_map
+        self._scoped_maps.extend(walker._scoped_maps)
+        return walker._current_scope()
 
     def _merge_branch_types(self, base: dict[str, str], left: dict[str, str], right: dict[str, str]) -> dict[str, str]:
         merged = base.copy()
@@ -935,10 +986,8 @@ class _TypeInferencer(ast.NodeVisitor):
 
     def _bind_target(self, target: ast.AST, val_type: Optional[str], elem_type: Optional[str], source: ast.AST | None):
         if isinstance(target, ast.Name):
-            if val_type:
-                self.type_map[target.id] = val_type
-            if elem_type:
-                self.type_map[f"{target.id}.__element__"] = elem_type
+            self._set_type(target.id, val_type)
+            self._set_type(f"{target.id}.__element__", elem_type)
             if source is not None:
                 self._record_dict_key_types(target.id, source)
         elif isinstance(target, (ast.Tuple, ast.List)):
@@ -960,18 +1009,18 @@ class _TypeInferencer(ast.NodeVisitor):
     def _bind_arg_annotation(self, arg: ast.arg) -> None:
         ann_type, elem_type = _annotation_types(getattr(arg, "annotation", None))
         if ann_type:
-            self.type_map[arg.arg] = ann_type
+            self._set_type(arg.arg, ann_type)
         if elem_type:
-            self.type_map[f"{arg.arg}.__element__"] = elem_type
+            self._set_type(f"{arg.arg}.__element__", elem_type)
 
     def _existing_type(self, target: ast.AST) -> Optional[str]:
         if isinstance(target, ast.Name):
-            return self.type_map.get(target.id)
+            return self._get_type(target.id)
         return None
 
     def _existing_element(self, target: ast.AST) -> Optional[str]:
         if isinstance(target, ast.Name):
-            return self.type_map.get(f"{target.id}.__element__")
+            return self._get_type(f"{target.id}.__element__")
         return None
 
     def _value_type(self, value: ast.AST | None) -> tuple[Optional[str], Optional[str]]:
@@ -1017,8 +1066,9 @@ class _TypeInferencer(ast.NodeVisitor):
             if isinstance(value.value, str):
                 return "str", None
         if isinstance(value, ast.Name):
-            if value.id in self.type_map:
-                return self.type_map[value.id], self.type_map.get(f"{value.id}.__element__")
+            existing = self._get_type(value.id)
+            if existing:
+                return existing, self._get_type(f"{value.id}.__element__")
             if value.id in {"character", "combat", "ctx"}:
                 return value.id, None
         if isinstance(value, ast.Attribute):
@@ -1026,8 +1076,8 @@ class _TypeInferencer(ast.NodeVisitor):
             base_type = None
             base_elem = None
             if isinstance(value.value, ast.Name):
-                base_type = self.type_map.get(value.value.id)
-                base_elem = self.type_map.get(f"{value.value.id}.__element__")
+                base_type = self._get_type(value.value.id)
+                base_elem = self._get_type(f"{value.value.id}.__element__")
             if base_type is None:
                 base_type, base_elem = self._value_type(value.value)
             if base_type:
@@ -1092,11 +1142,12 @@ class _TypeInferencer(ast.NodeVisitor):
         base_name = base_expr.id if isinstance(base_expr, ast.Name) else None
         if base_name and key_literal is not None:
             dict_key = f"{base_name}.{key_literal}"
-            if dict_key in self.type_map:
-                return self.type_map[dict_key], self.type_map.get(f"{dict_key}.__element__")
+            dict_type = self._get_type(dict_key)
+            if dict_type:
+                return dict_type, self._get_type(f"{dict_key}.__element__")
         elem_hint = base_elem
         if base_name and not elem_hint:
-            elem_hint = self.type_map.get(f"{base_name}.__element__")
+            elem_hint = self._get_type(f"{base_name}.__element__")
         if base_type:
             meta = _type_meta(base_type)
             if key_literal is not None and key_literal in meta.attrs:
@@ -1124,9 +1175,18 @@ class _TypeInferencer(ast.NodeVisitor):
                 continue
             val_type, elem_type = self._value_type(val_node)
             if val_type:
-                self.type_map[f"{var_name}.{key_literal}"] = val_type
+                self._set_type(f"{var_name}.{key_literal}", val_type)
             if elem_type:
-                self.type_map[f"{var_name}.{key_literal}.__element__"] = elem_type
+                self._set_type(f"{var_name}.{key_literal}.__element__", elem_type)
+
+    def _record_scope(self, node: ast.AST) -> None:
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", start)
+        if start is None or end is None:
+            return
+        start = max(start - 1, 0)
+        end = max(end - 1, start)
+        self._scoped_maps.append(((start, end), self._current_scope().copy()))
 
 
 def _resolve_type_name(receiver: str, code: str, type_map: Dict[str, str] | None = None) -> str:

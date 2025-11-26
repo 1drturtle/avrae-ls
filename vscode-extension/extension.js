@@ -76,6 +76,18 @@ function activate(context) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("avrae-ls.refreshGvars", async () => {
+      try {
+        const result = await refreshGvars();
+        const count = (result && result.count) || 0;
+        vscode.window.showInformationMessage(`Refreshed gvars (cached ${count}).`);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to refresh gvars: ${err}`);
+      }
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("avrae-ls.showPreview", async () => {
       ensurePreviewPanel(context);
       await runAndRenderActive();
@@ -116,6 +128,11 @@ function activate(context) {
         args: parseArgs(previewArgsState),
       },
     ];
+    try {
+      await refreshGvars();
+    } catch (err) {
+      vscode.window.showWarningMessage(`GVAR refresh failed: ${err}`);
+    }
     let result;
     try {
       result = await client.sendRequest("workspace/executeCommand", {
@@ -398,6 +415,14 @@ pre { white-space: pre-wrap; word-break: break-word; }
     }
     if (current) result.push(current);
     return result;
+  }
+
+  function refreshGvars(profile) {
+    const payload = profile ? { profile } : {};
+    return client.sendRequest("workspace/executeCommand", {
+      command: "avrae.refreshGvars",
+      arguments: [payload],
+    });
   }
 }
 

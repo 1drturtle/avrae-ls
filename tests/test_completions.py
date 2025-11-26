@@ -30,6 +30,22 @@ def test_attribute_completion_from_variable_binding():
     assert "name" in labels
 
 
+def test_function_locals_do_not_type_leak_to_module_scope():
+    code = "\n".join(
+        [
+            "def build():",
+            "    temp = character()",
+            "    return temp",
+            "",
+            "temp = None",
+            "temp.",
+        ]
+    )
+    items = completion_items_for_position(code, line=5, character=len("temp."), suggestions=[])
+    labels = {item.label for item in items}
+    assert "name" not in labels
+
+
 def test_nested_attributes_completion():
     code = "x = character()\ny = x.levels\nz = y."
     items = completion_items_for_position(code, line=2, character=len("z = y."), suggestions=[])

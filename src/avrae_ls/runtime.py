@@ -25,6 +25,9 @@ from .context import ContextData, GVarResolver
 from .config import AvraeServiceConfig, VarSources
 from .api import AliasContextAPI, CharacterAPI, SimpleCombat, SimpleRollResult
 from . import argparser as avrae_argparser
+
+_VERIFY_SIGNATURE_TIMEOUT = 5.0
+_VERIFY_SIGNATURE_RETRIES = 0
 # Minimal stand-in for Avrae's AliasException
 class AliasException(Exception):
     def __init__(self, msg, pm_user):
@@ -474,9 +477,8 @@ class MockExecutor:
             verify_cache_sig = sig_str
             verify_cache_error = None
             verify_cache_result = None
-            timeout = float(service_cfg.verify_timeout if service_cfg else AvraeServiceConfig.verify_timeout)
-            retries = int(service_cfg.verify_retries if service_cfg else AvraeServiceConfig.verify_retries)
-            retries = max(0, retries)
+            timeout = float(_VERIFY_SIGNATURE_TIMEOUT)
+            retries = max(0, _VERIFY_SIGNATURE_RETRIES)
 
             def _call_verify_api(signature: str) -> Dict[str, Any]:
                 base_url = (service_cfg.base_url if service_cfg else AvraeServiceConfig.base_url).rstrip("/")

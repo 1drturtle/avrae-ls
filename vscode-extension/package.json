@@ -2,7 +2,7 @@
   "name": "avrae-ls-client",
   "displayName": "Avrae Draconic Alias Language Server",
   "description": "VS Code client for avrae-ls (draconic alias diagnostics and mock execution).",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -21,7 +21,8 @@
   "activationEvents": [
     "onLanguage:avrae",
     "onCommand:avrae-ls.runAlias",
-    "onCommand:avrae-ls.reloadConfig"
+    "onCommand:avrae-ls.reloadConfig",
+    "onCommand:avrae-ls.refreshGvars"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -61,6 +62,10 @@
       {
         "command": "avrae-ls.showPreview",
         "title": "Avrae: Show Alias Preview"
+      },
+      {
+        "command": "avrae-ls.refreshGvars",
+        "title": "Avrae: Refresh GVARs"
       }
     ],
     "snippets": [

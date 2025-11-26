@@ -68,6 +68,7 @@ async def test_fetches_gvar_when_enabled(tmp_path):
         pytest.param("len(1, 2)", None, ["invalid arguments"], None, None, id="bad_args"),
         pytest.param("import os\nx=1", None, ["Imports are not supported"], None, None, id="imports_not_supported"),
         pytest.param("x + 1", None, ["undefined"], None, None, id="unknown_name"),
+        pytest.param("def inner():\n    y = 1\ninner()\ny", None, ["undefined"], None, None, id="function_scope_not_global"),
         pytest.param("get_gvar('abc')", None, ["gvar"], None, None, id="unknown_gvar"),
         pytest.param("class X:\n    def _hidden(self):\n        return 1\n\nX()._hidden()", None, ["private methods"], None, None, id="private_method_call"),
         pytest.param("x = roll('1d1')\ny = vroll('1d1')\nx + y.total", None, [], None, None, id="roll_and_vroll_available"),

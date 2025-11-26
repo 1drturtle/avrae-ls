@@ -2,7 +2,7 @@ import httpx
 import pytest
 
 from avrae_ls.argparser import InvalidArgument
-from avrae_ls.config import AvraeServiceConfig, VarSources
+from avrae_ls.config import VarSources
 from avrae_ls.context import ContextData, GVarResolver
 from avrae_ls.runtime import FunctionRequiresCharacter, MockExecutor, _parse_coins
 
@@ -488,36 +488,21 @@ async def test_verify_signature_cached(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_verify_signature_retries(monkeypatch, tmp_path):
-    calls: list[dict] = []
+async def test_verify_signature_does_not_retry(monkeypatch, tmp_path):
+    calls: list[str] = []
 
     def _fake_post(url, json=None, headers=None, timeout=None):
-        calls.append({"json": json, "headers": headers, "timeout": timeout})
-        if len(calls) < 3:
-            raise httpx.TimeoutException("network timeout")
-        return httpx.Response(
-            200,
-            json={
-                "success": True,
-                "data": {
-                    "user_data": len(calls),
-                },
-            },
-        )
+        calls.append(json.get("signature") if isinstance(json, dict) else "")
+        raise httpx.TimeoutException("network timeout")
 
     monkeypatch.setattr("avrae_ls.runtime.httpx.post", _fake_post)
 
-    cfg = AvraeServiceConfig(verify_timeout=9.5, verify_retries=2, token="secret-token")
-    executor = MockExecutor(cfg)
+    executor = MockExecutor()
     ctx = _ctx()
     resolver = _resolver(tmp_path)
-    result = await executor.run("verify_signature('sig-retry')", ctx, resolver)
-    assert result.error is None
-    assert len(calls) == 3
-    assert all(call["timeout"] == 9.5 for call in calls)
-    assert all(call["json"] == {"signature": "sig-retry"} for call in calls)
-    assert all(call["headers"].get("Authorization") == "secret-token" for call in calls)
-    assert result.value["user_data"] == 3
+    result = await executor.run("verify_signature('will-fail')", ctx, resolver)
+    assert result.error is not None
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio
