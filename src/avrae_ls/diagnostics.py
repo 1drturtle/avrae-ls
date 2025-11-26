@@ -149,6 +149,32 @@ class DiagnosticProvider:
                 for stmt in node.orelse:
                     self.visit(stmt)
 
+            def visit_ListComp(self, node: ast.ListComp):
+                self._visit_comprehension(node.elt, node.generators)
+
+            def visit_SetComp(self, node: ast.SetComp):
+                self._visit_comprehension(node.elt, node.generators)
+
+            def visit_GeneratorExp(self, node: ast.GeneratorExp):
+                self._visit_comprehension(node.elt, node.generators)
+
+            def visit_DictComp(self, node: ast.DictComp):
+                self._visit_comprehension(node.key, node.generators)
+                self._visit_comprehension(node.value, node.generators)
+
+            def _visit_comprehension(self, expr: ast.AST, generators: list[ast.comprehension]):
+                """
+                Comprehension targets have their own scope; ensure they are treated as defined within
+                the comprehension body without leaking to outer scopes.
+                """
+                local_tracker = set(self.tracker)
+                for gen in generators:
+                    Walker(local_tracker).visit(gen.iter)
+                    local_tracker.update(_names_in_target(gen.target))
+                    for cond in gen.ifs:
+                        Walker(local_tracker).visit(cond)
+                Walker(local_tracker).visit(expr)
+
             def visit_Name(self, node: ast.Name):
                 if isinstance(node.ctx, ast.Load) and node.id not in self.tracker:
                     diagnostics.append(
@@ -579,7 +605,6 @@ def _build_builtin_signatures() -> dict[str, inspect.Signature]:
     # runtime helpers we expose
     def get_gvar(key): ...
     def get_svar(name, default=None): ...
-    def get_cvar(name, default=None): ...
     def get_uvar(name, default=None): ...
     def get_uvars(): ...
     def set_uvar(name, value): ...
@@ -596,7 +621,6 @@ def _build_builtin_signatures() -> dict[str, inspect.Signature]:
     helpers = {
         "get_gvar": get_gvar,
         "get_svar": get_svar,
-        "get_cvar": get_cvar,
         "get_uvar": get_uvar,
         "get_uvars": get_uvars,
         "set_uvar": set_uvar,

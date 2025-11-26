@@ -24,6 +24,12 @@ def test_build_symbol_table_and_document_symbols():
     assert {s.name for s in doc_symbols} == {"x", "foo"}
 
 
+def test_build_symbol_table_includes_annotated_assignment():
+    source = 'result: "SimpleRollResult" = None\n'
+    table = build_symbol_table(source)
+    assert any(entry.name == "result" for entry in table.entries)
+
+
 def test_find_definition_range():
     source = "x = 1\ny = x + 2\n"
     table = build_symbol_table(source)

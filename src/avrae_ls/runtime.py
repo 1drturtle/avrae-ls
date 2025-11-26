@@ -244,7 +244,6 @@ class MockExecutor:
             "dump_yaml",
             "get_gvar",
             "get_svar",
-            "get_cvar",
             "get_uvar",
             "get_uvars",
             "set_uvar",
@@ -358,10 +357,6 @@ class MockExecutor:
 
         def _get_svar(name: str, default=None):
             return var_store.svars.get(str(name), default)
-
-        def _get_cvar(name: str, default=None):
-            val = var_store.cvars.get(str(name), default)
-            return str(val) if val is not None else default
 
         def _get_uvar(name: str, default=None):
             val = var_store.uvars.get(str(name), default)
@@ -559,7 +554,6 @@ class MockExecutor:
             character=lambda: character_fn(),
             get_gvar=_get_gvar,
             get_svar=_get_svar,
-            get_cvar=_get_cvar,
             get_uvar=_get_uvar,
             get_uvars=_get_uvars,
             set_uvar=_set_uvar,

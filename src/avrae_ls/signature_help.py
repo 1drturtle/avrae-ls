@@ -53,10 +53,6 @@ def _runtime_helper_sigs() -> Dict[str, FunctionSig]:
             ["name", "default=None"],
             "Gets a server variable by name, returning default if it is not present.",
         ),
-        "get_cvar": (
-            ["name", "default=None"],
-            "Gets a character variable by name as a string, returning default if it is not present.",
-        ),
         "get_uvar": (
             ["name", "default=None"],
             "Gets a user variable by name as a string, returning default if it is not present.",

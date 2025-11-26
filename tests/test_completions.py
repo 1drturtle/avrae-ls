@@ -250,3 +250,10 @@ def test_argparse_hover_shows_parsed_arguments_type():
     hover = hover_for_position(code, line=1, character=len("args"), sigs={}, ctx_data=ctx_data, resolver=resolver)
     assert hover is not None
     assert "ParsedArguments" in hover.contents.value
+
+
+def test_parameter_annotation_infers_type():
+    code = 'def use_roll(res: "SimpleRollResult"):\n    res.'
+    items = completion_items_for_position(code, line=1, character=len("    res."), suggestions=[])
+    labels = {item.label for item in items}
+    assert "dice" in labels

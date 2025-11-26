@@ -147,6 +147,14 @@ def _entry_from_node(node: ast.AST, line_offset: int = 0, char_offset: int = 0) 
             node = target
         else:
             return None
+    elif isinstance(node, ast.AnnAssign):
+        target = node.target
+        if isinstance(target, ast.Name):
+            kind = types.SymbolKind.Variable
+            name = target.id
+            node = target
+        else:
+            return None
     else:
         return None
 

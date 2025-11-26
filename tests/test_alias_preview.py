@@ -54,6 +54,31 @@ async def test_preview_argument_parsing(tmp_path):
     assert rendered.last_value == "first arg"
 
 
+@pytest.mark.asyncio
+async def test_preview_inline_expression(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+    alias_text = "!alias hello echo value {{1 + 2}}"
+
+    rendered = await render_alias_command(alias_text, executor, ctx, resolver)
+    assert rendered.error is None
+    assert rendered.command == "echo value 3"
+    assert rendered.last_value == 3
+
+
+@pytest.mark.asyncio
+async def test_preview_inline_roll(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+    alias_text = "!alias hello echo rolled {1}"
+
+    rendered = await render_alias_command(alias_text, executor, ctx, resolver)
+    assert rendered.error is None
+    assert rendered.command == "echo rolled 1"
+
+
 def test_simulate_command_accepts_embed():
     payload = '-title "Hello"'
     simulated = simulate_command(f"embed {payload}")

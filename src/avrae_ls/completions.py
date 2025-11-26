@@ -674,6 +674,39 @@ def _display_type_label(type_key: str) -> str:
     return type_key
 
 
+def _split_annotation_string(text: str) -> tuple[Optional[str], Optional[str]]:
+    stripped = text.strip().strip("'\"")
+    if not stripped:
+        return None, None
+    match = re.match(r"^([A-Za-z_][\w]*)\s*(?:\[\s*([A-Za-z_][\w]*)(?:\s*,\s*([A-Za-z_][\w]*))?\s*\])?$", stripped)
+    if not match:
+        return stripped, None
+    base = match.group(1)
+    elem = match.group(3) or match.group(2)
+    base_norm = base.lower() if base.lower() in {"list", "dict", "set", "tuple"} else base
+    return base_norm, elem
+
+
+def _annotation_types(node: ast.AST | None) -> tuple[Optional[str], Optional[str]]:
+    if node is None:
+        return None, None
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return _split_annotation_string(node.value)
+    if isinstance(node, ast.Str):
+        return _split_annotation_string(node.s)
+    if isinstance(node, ast.Name):
+        return node.id, None
+    if isinstance(node, ast.Attribute):
+        return node.attr, None
+    try:
+        text = ast.unparse(node)
+    except Exception:
+        text = ""
+    if text:
+        return _split_annotation_string(text)
+    return None, None
+
+
 def _infer_receiver_type(code: str, name: str) -> Optional[str]:
     return _infer_type_map(code).get(name)
 
@@ -701,6 +734,9 @@ class _TypeInferencer(ast.NodeVisitor):
 
     def visit_AnnAssign(self, node: ast.AnnAssign):
         val_type, elem_type = self._value_type(node.value) if node.value else (None, None)
+        ann_type, ann_elem = _annotation_types(getattr(node, "annotation", None))
+        val_type = val_type or ann_type
+        elem_type = elem_type or ann_elem
         self._bind_target(node.target, val_type, elem_type, node.value)
         self.generic_visit(node)
 
@@ -726,6 +762,14 @@ class _TypeInferencer(ast.NodeVisitor):
         if not elem_type and isinstance(node.iter, ast.Name):
             elem_type = self.type_map.get(f"{node.iter.id}.__element__")
         self._bind_target(node.target, elem_type, None, None)
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        self._bind_function_args(node.args)
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        self._bind_function_args(node.args)
         self.generic_visit(node)
 
     def visit_If(self, node: ast.If):
@@ -771,6 +815,25 @@ class _TypeInferencer(ast.NodeVisitor):
         elif isinstance(target, (ast.Tuple, ast.List)):
             for elt in target.elts:
                 self._bind_target(elt, val_type, elem_type, source)
+
+    def _bind_function_args(self, args: ast.arguments) -> None:
+        for arg in getattr(args, "posonlyargs", []):
+            self._bind_arg_annotation(arg)
+        for arg in args.args:
+            self._bind_arg_annotation(arg)
+        if args.vararg:
+            self._bind_arg_annotation(args.vararg)
+        for arg in args.kwonlyargs:
+            self._bind_arg_annotation(arg)
+        if args.kwarg:
+            self._bind_arg_annotation(args.kwarg)
+
+    def _bind_arg_annotation(self, arg: ast.arg) -> None:
+        ann_type, elem_type = _annotation_types(getattr(arg, "annotation", None))
+        if ann_type:
+            self.type_map[arg.arg] = ann_type
+        if elem_type:
+            self.type_map[f"{arg.arg}.__element__"] = elem_type
 
     def _existing_type(self, target: ast.AST) -> Optional[str]:
         if isinstance(target, ast.Name):

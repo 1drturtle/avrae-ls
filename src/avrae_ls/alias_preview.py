@@ -5,8 +5,8 @@ import shlex
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional, Tuple
 
-from .parser import DRACONIC_RE
-from .runtime import ExecutionResult, MockExecutor
+from .parser import DRACONIC_RE, INLINE_DRACONIC_RE, INLINE_ROLL_RE
+from .runtime import ExecutionResult, MockExecutor, _roll_dice
 from .context import ContextData, GVarResolver
 from .argument_parsing import apply_argument_parsing
 
@@ -87,17 +87,37 @@ async def render_alias_command(
     error: BaseException | None = None
 
     pos = 0
+    matches: list[tuple[str, re.Match[str]]] = []
     for match in DRACONIC_RE.finditer(body):
+        matches.append(("block", match))
+    for match in INLINE_DRACONIC_RE.finditer(body):
+        matches.append(("inline", match))
+    for match in INLINE_ROLL_RE.finditer(body):
+        matches.append(("roll", match))
+
+    matches.sort(key=lambda item: item[1].start())
+
+    for kind, match in matches:
+        if match.start() < pos:
+            continue
         parts.append(body[pos: match.start()])
-        code = match.group(1)
-        result: ExecutionResult = await executor.run(code, ctx_data, resolver)
-        if result.stdout:
-            stdout_parts.append(result.stdout)
-        if result.error:
-            error = result.error
-            break
-        last_value = result.value
-        parts.append("" if result.value is None else str(result.value))
+
+        if kind in {"block", "inline"}:
+            code = match.group(1)
+            result: ExecutionResult = await executor.run(code, ctx_data, resolver)
+            if result.stdout:
+                stdout_parts.append(result.stdout)
+            if result.error:
+                error = result.error
+                break
+            last_value = result.value
+            if result.value is not None:
+                parts.append(str(result.value))
+        else:
+            roll_expr = match.group(1)
+            roll_total = _roll_dice(roll_expr)
+            last_value = roll_total
+            parts.append(str(roll_total))
         pos = match.end()
 
     if error is None:

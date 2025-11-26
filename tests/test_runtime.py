@@ -70,7 +70,6 @@ async def test_mock_executor_runs_code(tmp_path):
     assert result.value == 3
     assert result.stdout == ""
 
-
 @pytest.mark.asyncio
 async def test_mock_executor_resolves_gvars(tmp_path):
     executor = MockExecutor()

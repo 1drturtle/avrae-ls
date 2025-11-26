@@ -76,6 +76,10 @@ async def test_fetches_gvar_when_enabled(tmp_path):
         pytest.param("character.hp", None, ["Call character()"], None, None, id="character_not_called"),
         pytest.param("combat().combatants.hp", None, ["index or iterate"], None, {"combat": {"combatants": []}}, id="iterable_attribute_chain"),
         pytest.param("ctx.author()", None, ["property"], None, None, id="calling_property"),
+        pytest.param("!alias inline echo prefix {{bad_var}} suffix", None, ["undefined"], None, None, id="inline_expression_bad_var"),
+        pytest.param("!alias roll echo rolled {1}", "echo rolled 1", [], None, None, id="inline_roll_replaced"),
+        pytest.param("[x for x in range(3)]", None, [], None, None, id="list_comprehension_scopes_target"),
+        pytest.param("get_cvar", None, ["undefined"], None, None, id="bare_get_cvar_not_allowed"),
     ],
 )
 @pytest.mark.asyncio
@@ -126,3 +130,17 @@ async def test_drac_block_diagnostics_offset_respects_inline_char(tmp_path):
     # bad_var starts after the prefix and opening tag
     assert diag.range.start.line == 0
     assert diag.range.start.character > alias_text.index("<drac2>")
+
+
+@pytest.mark.asyncio
+async def test_inline_expression_diagnostics_offset_respects_inline_char(tmp_path):
+    provider = _provider()
+    resolver = _resolver(tmp_path)
+    ctx_data = ContextData(vars=VarSources())
+
+    alias_text = "!alias inline echo prefix {{bad_var}} suffix"
+    diags = await provider.analyze(alias_text, ctx_data, resolver)
+    assert diags
+    diag = diags[0]
+    assert diag.range.start.line == 0
+    assert diag.range.start.character > alias_text.index("{{")
