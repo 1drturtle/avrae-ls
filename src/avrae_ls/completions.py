@@ -6,7 +6,9 @@ import re
 import typing
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, ClassVar, Dict, Iterable, List, Optional
+from html import unescape
+from pathlib import Path
+from typing import Any, Callable, ClassVar, Dict, Iterable, List, Optional
 
 from lsprotocol import types
 
@@ -113,45 +115,102 @@ class _BuiltinStr:
     def format(self, *args, **kwargs) -> str: ...
 
 
-TYPE_MAP: Dict[str, object] = {
-    "character": CharacterAPI,
-    "combat": SimpleCombat,
-    "SimpleCombat": SimpleCombat,
-    "ctx": AliasContextAPI,
-    "SimpleRollResult": SimpleRollResult,
-    "stats": AliasBaseStats,
-    "levels": AliasLevels,
-    "attacks": AliasAttackList,
-    "attack": AliasAttack,
-    "skills": AliasSkills,
-    "AliasSkills": AliasSkills,
-    "skill": AliasSkill,
-    "AliasSkill": AliasSkill,
-    "saves": AliasSaves,
-    "resistances": AliasResistances,
-    "coinpurse": AliasCoinpurse,
-    "custom_counter": AliasCustomCounter,
-    "consumable": AliasCustomCounter,
-    "death_saves": AliasDeathSaves,
-    "action": AliasAction,
-    "spellbook": AliasSpellbook,
-    "spell": AliasSpellbookSpell,
-    "guild": GuildAPI,
-    "channel": ChannelAPI,
-    "category": CategoryAPI,
-    "author": AuthorAPI,
-    "role": RoleAPI,
-    "combatant": SimpleCombatant,
-    "SimpleCombatant": SimpleCombatant,
-    "group": SimpleGroup,
-    "SimpleGroup": SimpleGroup,
-    "effect": SimpleEffect,
-    "SimpleEffect": SimpleEffect,
-    "list": _BuiltinList,
-    "dict": _BuiltinDict,
-    "str": _BuiltinStr,
-    "ParsedArguments": ParsedArguments,
-}
+TypeResolver = Callable[[str | None], str | None]
+
+
+@dataclass(frozen=True)
+class TypeEntry:
+    cls: type
+    resolver: TypeResolver | None = None
+
+
+@dataclass(frozen=True)
+class TypeSpec:
+    name: str
+    cls: type
+    parents: tuple[str, ...] = ()
+    safe_methods: tuple[str, ...] = ()
+
+
+def _allow_from(type_key: str, *receiver_types: str) -> TypeResolver:
+    allowed = set(receiver_types)
+
+    def _resolver(receiver_type: str | None) -> str | None:
+        if receiver_type in allowed:
+            return type_key
+        return None
+
+    return _resolver
+
+
+TYPE_SPECS: list[TypeSpec] = [
+    TypeSpec("character", CharacterAPI, safe_methods=("get_cvar", "get_cc")),
+    TypeSpec("combat", SimpleCombat, safe_methods=("get_combatant", "get_group", "get_metadata")),
+    TypeSpec("SimpleCombat", SimpleCombat, safe_methods=("get_combatant", "get_group", "get_metadata")),
+    TypeSpec("ctx", AliasContextAPI),
+    TypeSpec("SimpleRollResult", SimpleRollResult),
+    TypeSpec("stats", AliasBaseStats),
+    TypeSpec("levels", AliasLevels, parents=("character",), safe_methods=("get",)),
+    TypeSpec("attacks", AliasAttackList, parents=("character",)),
+    TypeSpec("attack", AliasAttack, parents=("attacks", "actions")),
+    TypeSpec("skills", AliasSkills, parents=("character",)),
+    TypeSpec("AliasSkills", AliasSkills, parents=("character",)),
+    TypeSpec("skill", AliasSkill, parents=("skills",)),
+    TypeSpec("AliasSkill", AliasSkill, parents=("skills",)),
+    TypeSpec("saves", AliasSaves, parents=("character",), safe_methods=("get",)),
+    TypeSpec("resistances", AliasResistances, parents=("character",), safe_methods=("is_resistant", "is_immune", "is_vulnerable", "is_neutral")),
+    TypeSpec("coinpurse", AliasCoinpurse, parents=("character",), safe_methods=("get_coins",)),
+    TypeSpec("custom_counter", AliasCustomCounter, parents=("character",)),
+    TypeSpec("consumable", AliasCustomCounter, parents=("character",)),
+    TypeSpec("death_saves", AliasDeathSaves, parents=("character",), safe_methods=("is_stable", "is_dead")),
+    TypeSpec("action", AliasAction, parents=("actions", "character")),
+    TypeSpec("spellbook", AliasSpellbook, parents=("character",), safe_methods=("find", "get_slots", "get_max_slots", "remaining_casts_of", "can_cast")),
+    TypeSpec("spell", AliasSpellbookSpell, parents=("spellbook",)),
+    TypeSpec("guild", GuildAPI, parents=("ctx",)),
+    TypeSpec("channel", ChannelAPI, parents=("ctx",)),
+    TypeSpec("category", CategoryAPI, parents=("channel",)),
+    TypeSpec("author", AuthorAPI, parents=("ctx",)),
+    TypeSpec("role", RoleAPI, parents=("author",)),
+    TypeSpec("combatant", SimpleCombatant, parents=("combat", "SimpleCombat", "group", "SimpleGroup"), safe_methods=("get_effect",)),
+    TypeSpec("SimpleCombatant", SimpleCombatant, parents=("combat", "SimpleCombat", "group", "SimpleGroup"), safe_methods=("get_effect",)),
+    TypeSpec("group", SimpleGroup, parents=("combat", "SimpleCombat"), safe_methods=("get_combatant",)),
+    TypeSpec("SimpleGroup", SimpleGroup, parents=("combat", "SimpleCombat"), safe_methods=("get_combatant",)),
+    TypeSpec("effect", SimpleEffect, parents=("combatant", "SimpleCombatant")),
+    TypeSpec("SimpleEffect", SimpleEffect, parents=("combatant", "SimpleCombatant")),
+    TypeSpec("list", _BuiltinList),
+    TypeSpec("int", int),
+    TypeSpec("dict", _BuiltinDict, safe_methods=("get",)),
+    TypeSpec("str", _BuiltinStr),
+    TypeSpec("ParsedArguments", ParsedArguments),
+]
+
+
+def _build_type_maps(specs: list[TypeSpec]) -> tuple[Dict[str, TypeEntry], dict[type, set[str]]]:
+    type_map: dict[str, TypeEntry] = {}
+    safe_methods: dict[type, set[str]] = {}
+    for spec in specs:
+        resolver = _allow_from(spec.name, *spec.parents) if spec.parents else None
+        type_map[spec.name] = TypeEntry(spec.cls, resolver=resolver)
+        if spec.safe_methods:
+            safe_methods.setdefault(spec.cls, set()).update(spec.safe_methods)
+    return type_map, safe_methods
+
+
+TYPE_MAP, SAFE_METHODS = _build_type_maps(TYPE_SPECS)
+
+
+def _resolve_type_key(type_key: str, receiver_type: str | None = None) -> str | None:
+    entry = TYPE_MAP.get(type_key)
+    if not entry:
+        return None
+    return entry.resolver(receiver_type) if entry.resolver else type_key
+
+
+def _type_cls(type_key: str) -> type | None:
+    entry = TYPE_MAP.get(type_key)
+    if not entry:
+        return None
+    return entry.cls
 
 
 IDENT_RE = re.compile(r"[A-Za-z_]\w*$")
@@ -407,6 +466,59 @@ _ATTR_DOC_OVERRIDES: dict[str, dict[str, str]] = {
     "SimpleEffect": _EFFECT_DOCS,
 }
 
+_METHOD_DOC_OVERRIDES: dict[str, dict[str, str]] = {
+    "ParsedArguments": {
+        "get": "returns all values for the arg cast to the given type.",
+        "last": "returns the most recent value cast to the given type.",
+        "adv": "returns -1/0/1/2 indicator for dis/normal/adv/elven accuracy.",
+        "join": "joins all argument values with a separator into a string.",
+        "ignore": "removes argument values so later reads skip them.",
+        "update": "replaces values for an argument.",
+        "update_nx": "sets values only if the argument is missing.",
+        "set_context": "associates a context bucket for nested parsing.",
+        "add_context": "appends a context bucket for nested parsing.",
+    },
+}
+
+
+def _load_method_docs_from_html(path: Path | str = "tmp_avrae_api.html") -> dict[str, dict[str, str]]:
+    docs: dict[str, dict[str, str]] = {}
+    try:
+        html = Path(path).read_text(encoding="utf-8")
+    except Exception:
+        return docs
+    pattern = re.compile(
+        r'<dt class="sig[^"]*" id="aliasing\.api\.[^\.]+\.(?P<class>\w+)\.(?P<method>\w+)">.*?</dt>\s*(?P<body><dd.*?</dd>)',
+        re.DOTALL,
+    )
+    tag_re = re.compile(r"<[^>]+>")
+    for match in pattern.finditer(html):
+        cls = match.group("class")
+        method = match.group("method")
+        body = match.group("body")
+        raw_text = unescape(tag_re.sub("", body)).strip()
+        text = _strip_signature_prefix(raw_text)
+        if not text:
+            continue
+        docs.setdefault(cls, {})[method] = text
+    return docs
+
+
+def _strip_signature_prefix(text: str) -> str:
+    cleaned = re.sub(r"^[A-Za-z_][\w]*\s*\([^)]*\)\s*(?:->|→)?\s*", "", text)
+    if cleaned != text:
+        return cleaned.strip()
+    # Fallback: split on common dash separators after a signature-like prefix.
+    for sep in ("–", "—", "-"):
+        parts = text.split(sep, 1)
+        if len(parts) == 2 and "(" in parts[0] and ")" in parts[0]:
+            return parts[1].strip()
+    return text.strip()
+
+
+# Enrich method docs from the bundled API HTML when available.
+_METHOD_DOC_OVERRIDES.update(_load_method_docs_from_html())
+
 
 def gather_suggestions(
     ctx_data: ContextData,
@@ -478,6 +590,9 @@ def completion_items_for_position(
 def _attribute_completions(receiver: str, prefix: str, code: str, type_map: Dict[str, str] | None = None) -> List[types.CompletionItem]:
     items: list[types.CompletionItem] = []
     type_key = _resolve_type_name(receiver, code, type_map)
+    if IDENT_RE.fullmatch(receiver) and (not type_map or receiver not in type_map) and type_key == receiver:
+        # Avoid treating arbitrary variable names as known API types unless they were inferred.
+        return items
     meta = _type_meta(type_key)
     detail = f"{type_key}()"
 
@@ -605,35 +720,50 @@ def _attribute_receiver_and_prefix(code: str, line: int, character: int, capture
     tail = line_text[dot + 1 :]
     prefix_match = re.match(r"\s*([A-Za-z_]\w*)?", tail)
     prefix = prefix_match.group(1) or "" if prefix_match else ""
-    suffix = tail[prefix_match.end() if prefix_match else 0 :]
-    placeholder = "__COMPLETE__"
-    new_line = f"{line_text[:dot]}.{placeholder}{suffix}"
-    # Close unmatched parentheses so the temporary code parses.
-    paren_balance = new_line.count("(") - new_line.count(")")
-    if paren_balance > 0:
-        new_line = new_line + (")" * paren_balance)
-    mod_lines = list(lines)
-    mod_lines[line] = new_line
-    mod_code = "\n".join(mod_lines)
-    try:
-        tree = ast.parse(mod_code)
-    except SyntaxError:
-        return None
 
-    receiver_src: Optional[str] = None
+    receiver_fragment = line_text[:dot].rstrip()
+    start = len(receiver_fragment)
+    paren = bracket = brace = 0
 
-    class Finder(ast.NodeVisitor):
-        def visit_Attribute(self, node: ast.Attribute):
-            nonlocal receiver_src
-            if isinstance(node.attr, str) and node.attr == placeholder:
-                try:
-                    receiver_src = ast.unparse(node.value)
-                except Exception:
-                    receiver_src = None
-            self.generic_visit(node)
+    def _allowed(ch: str) -> bool:
+        return ch.isalnum() or ch in {"_", ".", "]", "[", ")", "(", "'", '"'}
 
-    Finder().visit(tree)
-    if receiver_src is None:
+    for idx in range(len(receiver_fragment) - 1, -1, -1):
+        ch = receiver_fragment[idx]
+        if ch in ")]}":
+            if ch == ")":
+                paren += 1
+            elif ch == "]":
+                bracket += 1
+            else:
+                brace += 1
+            start = idx
+            continue
+        if ch in "([{":
+            if ch == "(" and paren > 0:
+                paren -= 1
+                start = idx
+                continue
+            if ch == "[" and bracket > 0:
+                bracket -= 1
+                start = idx
+                continue
+            if ch == "{" and brace > 0:
+                brace -= 1
+                start = idx
+                continue
+            break
+        if paren or bracket or brace:
+            start = idx
+            continue
+        if ch.isspace():
+            break
+        if not _allowed(ch):
+            break
+        start = idx
+
+    receiver_src = receiver_fragment[start:].strip()
+    if not receiver_src:
         return None
     return receiver_src, prefix
 
@@ -669,9 +799,8 @@ def _line_text(code: str, line: int) -> str:
 
 
 def _display_type_label(type_key: str) -> str:
-    if type_key in TYPE_MAP:
-        return TYPE_MAP[type_key].__name__
-    return type_key
+    cls = _type_cls(type_key)
+    return cls.__name__ if cls else type_key
 
 
 def _split_annotation_string(text: str) -> tuple[Optional[str], Optional[str]]:
@@ -911,8 +1040,9 @@ class _TypeInferencer(ast.NodeVisitor):
                         return base_type, attr_meta.element_type
                 if base_elem:
                     return base_elem, None
-                if attr_name in TYPE_MAP:
-                    return attr_name, None
+                resolved_attr_type = _resolve_type_key(attr_name, base_type)
+                if resolved_attr_type:
+                    return resolved_attr_type, None
             return None, None
         if isinstance(value, ast.IfExp):
             t_type, t_elem = self._value_type(value.body)
@@ -1038,11 +1168,13 @@ def _resolve_type_name(receiver: str, code: str, type_map: Dict[str, str] | None
     elem_key = f"{receiver}.__element__"
     if elem_key in mapping:
         return mapping[elem_key]
-    if receiver in TYPE_MAP:
-        return receiver
+    resolved_receiver = _resolve_type_key(receiver)
+    if resolved_receiver:
+        return resolved_receiver
     tail = receiver.split(".")[-1].split("[", 1)[0]
-    if tail in TYPE_MAP:
-        return tail
+    resolved_tail = _resolve_type_key(tail)
+    if resolved_tail:
+        return resolved_tail
     return receiver
 
 
@@ -1053,23 +1185,22 @@ def _type_meta(type_name: str) -> TypeMeta:
 @lru_cache()
 def _type_meta_map() -> Dict[str, TypeMeta]:
     meta: dict[str, TypeMeta] = {}
-    reverse_type_map: dict[type, str] = {}
-    for key, cls in TYPE_MAP.items():
-        reverse_type_map[cls] = key
+    reverse_type_map: dict[type, str] = {entry.cls: key for key, entry in TYPE_MAP.items()}
 
     def _iter_element_for_type_name(type_name: str) -> str:
-        cls = TYPE_MAP.get(type_name)
+        cls = _type_cls(type_name)
         if not cls:
             return ""
         return _element_type_from_iterable(cls, reverse_type_map)
 
     def _getitem_element_for_type_name(type_name: str) -> str:
-        cls = TYPE_MAP.get(type_name)
+        cls = _type_cls(type_name)
         if not cls:
             return ""
         return _element_type_from_getitem(cls, reverse_type_map)
 
-    for type_name, cls in TYPE_MAP.items():
+    for type_name, entry in TYPE_MAP.items():
+        cls = entry.cls
         attrs: dict[str, AttrMeta] = {}
         methods: dict[str, MethodMeta] = {}
         iterable_element = _iter_element_for_type_name(type_name)
@@ -1078,6 +1209,10 @@ def _type_meta_map() -> Dict[str, TypeMeta]:
         override_docs = {
             **_ATTR_DOC_OVERRIDES.get(type_name, {}),
             **_ATTR_DOC_OVERRIDES.get(cls.__name__, {}),
+        }
+        method_override_docs = {
+            **_METHOD_DOC_OVERRIDES.get(type_name, {}),
+            **_METHOD_DOC_OVERRIDES.get(cls.__name__, {}),
         }
 
         for attr in getattr(cls, "ATTRS", []):
@@ -1115,6 +1250,8 @@ def _type_meta_map() -> Dict[str, TypeMeta]:
             if callable(meth_obj):
                 sig_label = _format_method_signature(meth, meth_obj)
                 doc = (meth_obj.__doc__ or "").strip()
+            if not doc:
+                doc = method_override_docs.get(meth, doc)
             methods[meth] = MethodMeta(signature=sig_label, doc=doc)
 
         meta[type_name] = TypeMeta(attrs=attrs, methods=methods, element_type=element_hint)
@@ -1207,15 +1344,6 @@ def _element_type_from_getitem(cls: type, reverse_type_map: Dict[type, str]) -> 
         return name or elem
     except Exception:
         return ""
-
-
-def _attribute_at_position(line_text: str, cursor: int) -> tuple[Optional[str], Optional[str]]:
-    cursor = max(0, min(cursor, len(line_text)))
-    for match in ATTR_AT_CURSOR_RE.finditer(line_text):
-        start, end = match.span(2)
-        if start <= cursor <= end:
-            return match.group(1), match.group(2)
-    return None, None
 
 
 def _infer_constant_bindings(code: str, upto_line: int | None, ctx_data: ContextData) -> Dict[str, Any]:
@@ -1439,16 +1567,30 @@ def _describe_type(value: Any) -> str:
 
 
 def _preview_value(value: Any) -> str:
-    text = repr(value)
-    if len(text) > 120:
-        text = text[:117] + "..."
-    return text
+    def _short(val: Any, max_len: int = 30) -> str:
+        try:
+            text = repr(val)
+        except Exception:
+            text = type(val).__name__
+        return text if len(text) <= max_len else text[: max_len - 3] + "..."
+
+    try:
+        if isinstance(value, dict):
+            items = list(value.items())
+            parts = [f"{_short(k)}: {_short(v)}" for k, v in items[:3]]
+            suffix = ", …" if len(items) > 3 else ""
+            return "{" + ", ".join(parts) + suffix + f"}} ({len(items)} items)"
+        if isinstance(value, (list, tuple, set)):
+            seq = list(value)
+            parts = [_short(v) for v in seq[:3]]
+            suffix = ", …" if len(seq) > 3 else ""
+            bracket = ("[", "]") if isinstance(value, list) else ("(", ")") if isinstance(value, tuple) else ("{", "}")
+            return f"{bracket[0]}" + ", ".join(parts) + suffix + f"{bracket[1]} ({len(seq)} items)"
+    except Exception:
+        pass
+    return _short(value, max_len=120)
 
 
 class _LoopVarBinding:
     def __repr__(self) -> str:
         return "<loop item>"
-SAFE_METHODS: dict[type, set[str]] = {
-    AliasLevels: {"get"},
-    dict: {"get"},
-}

@@ -257,3 +257,67 @@ def test_parameter_annotation_infers_type():
     items = completion_items_for_position(code, line=1, character=len("    res."), suggestions=[])
     labels = {item.label for item in items}
     assert "dice" in labels
+
+
+def test_plain_identifier_named_like_type_does_not_infer():
+    code = "category = None\ncategory."
+    items = completion_items_for_position(code, line=1, character=len("category."), suggestions=[])
+    labels = {item.label for item in items}
+    assert "name" not in labels
+    assert "id" not in labels
+
+
+def test_spellbook_completions_only_from_character():
+    bare_code = "spellbook = None\nspellbook."
+    bare_items = completion_items_for_position(bare_code, line=1, character=len("spellbook."), suggestions=[])
+    bare_labels = {item.label for item in bare_items}
+    assert "spells" not in bare_labels
+
+    via_char_code = "sb = character().spellbook\nsb."
+    via_char_items = completion_items_for_position(via_char_code, line=1, character=len("sb."), suggestions=[])
+    via_char_labels = {item.label for item in via_char_items}
+    assert "spells" in via_char_labels
+    assert "dc" in via_char_labels
+
+
+def test_channel_completions_only_from_ctx():
+    bare_code = "channel = None\nchannel."
+    bare_items = completion_items_for_position(bare_code, line=1, character=len("channel."), suggestions=[])
+    bare_labels = {item.label for item in bare_items}
+    assert "topic" not in bare_labels
+
+    via_ctx_code = "chan = ctx.channel\nchan."
+    via_ctx_items = completion_items_for_position(via_ctx_code, line=1, character=len("chan."), suggestions=[])
+    via_ctx_labels = {item.label for item in via_ctx_items}
+    assert "topic" in via_ctx_labels
+    assert "parent" in via_ctx_labels
+
+
+def test_effect_completions_only_from_combatant():
+    bare_code = "effect = None\neffect."
+    bare_items = completion_items_for_position(bare_code, line=1, character=len("effect."), suggestions=[])
+    bare_labels = {item.label for item in bare_items}
+    assert "duration" not in bare_labels
+
+    via_combat_code = "eff = combat().combatants[0].effects[0]\neff."
+    via_combat_items = completion_items_for_position(via_combat_code, line=1, character=len("eff."), suggestions=[])
+    via_combat_labels = {item.label for item in via_combat_items}
+    assert "duration" in via_combat_labels
+    assert "name" in via_combat_labels
+
+
+def test_safe_methods_evaluated_for_constant_bindings():
+    cfg = AvraeLSConfig.default(Path("."))
+    builder = ContextBuilder(cfg)
+    ctx_data = builder.build()
+    resolver = builder.gvar_resolver
+
+    resist_code = "val = character().resistances.is_resistant('fire')\nval"
+    resist_hover = hover_for_position(resist_code, line=1, character=len("val"), sigs={}, ctx_data=ctx_data, resolver=resolver)
+    assert resist_hover is not None
+    assert "bool" in resist_hover.contents.value
+
+    slots_code = "slots = character().spellbook.get_slots(1)\nslots"
+    slots_hover = hover_for_position(slots_code, line=1, character=len("slots"), sigs={}, ctx_data=ctx_data, resolver=resolver)
+    assert slots_hover is not None
+    assert "int" in slots_hover.contents.value
