@@ -113,7 +113,7 @@ def _run_alias_tests(target: Path) -> int:
     log = logging.getLogger(__name__)
     log.info("Running alias tests in %s (workspace root: %s)", target, workspace_root)
 
-    config, warnings = load_config(workspace_root)
+    config, warnings = load_config(workspace_root, default_enable_gvar_fetch=True)
     for warning in warnings:
         log.warning(warning)
 
