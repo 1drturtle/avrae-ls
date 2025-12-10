@@ -184,7 +184,7 @@ function activate(context) {
 
   function renderPreview(result) {
     if (!previewPanel) return;
-    const { stdout = "", result: value, error, validationError } = result;
+    const { stdout = "", result: value, error, validationError, state } = result;
     const renderedResult = value === undefined
       ? `<div class="empty">No result</div>`
       : `<pre class="result code-block">${escapeHtml(JSON.stringify(value, null, 2))}</pre>`;
@@ -208,6 +208,9 @@ function activate(context) {
       : result.result !== undefined
         ? `<pre class="code-block">${escapeHtml(String(result.result))}</pre>`
         : `<div class="empty">Nothing to preview</div>`;
+    const renderedState = state
+      ? `<pre class="code-block">${escapeHtml(JSON.stringify(state, null, 2))}</pre>`
+      : `<div class="empty">No state captured</div>`;
 
     previewPanel.webview.html = `<!DOCTYPE html>
 <html>
@@ -265,12 +268,14 @@ pre { white-space: pre-wrap; word-break: break-word; }
     <button class="tab-btn" data-tab="stdout">Stdout</button>
     <button class="tab-btn" data-tab="diagnostics">Diagnostics</button>
     <button class="tab-btn" data-tab="command">Command</button>
+    <button class="tab-btn" data-tab="state">State</button>
   </div>
   <div id="preview" class="tab-panel active">${renderedPreview}</div>
   <div id="result" class="tab-panel">${renderedResult}</div>
   <div id="stdout" class="tab-panel">${renderedStdout}</div>
   <div id="diagnostics" class="tab-panel">${renderedDiagnostics}</div>
   <div id="command" class="tab-panel">${renderedCommand}</div>
+  <div id="state" class="tab-panel">${renderedState}</div>
   <script>
     const vscode = acquireVsCodeApi();
     const input = document.getElementById('argsInput');

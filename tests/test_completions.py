@@ -160,6 +160,16 @@ def test_builtin_str_completions():
     assert "split" in labels
 
 
+def test_float_call_infers_type_for_hover():
+    cfg = AvraeLSConfig.default(Path("."))
+    ctx_data = ContextData()
+    resolver = GVarResolver(cfg)
+    code = "x = float()\nx"
+    hover = hover_for_position(code, line=1, character=1, sigs={}, ctx_data=ctx_data, resolver=resolver)
+    assert hover is not None
+    assert "float" in hover.contents.value
+
+
 def test_attribute_completion_inside_call_does_not_use_builtin_suggestions():
     cfg = AvraeLSConfig.default(Path("."))
     ctx_data = ContextData()
@@ -192,6 +202,41 @@ def test_attribute_completion_inside_call_does_not_use_builtin_suggestions():
     labels_idx = {item.label for item in items_idx}
     assert "name" in labels_idx
     assert "abs" not in labels_idx
+
+
+def test_type_comment_provides_type_inference():
+    code = "x = None  # type: character\nx."
+    items = completion_items_for_position(code, line=1, character=len("x."), suggestions=[])
+    labels = {item.label for item in items}
+    assert "name" in labels
+    assert "levels" in labels
+
+
+def test_comparison_infers_bool():
+    code = "x = 3 > 4\nx"
+    cfg = AvraeLSConfig.default(Path("."))
+    ctx_data = ContextData()
+    resolver = GVarResolver(cfg)
+    hover = hover_for_position(code, line=1, character=1, sigs={}, ctx_data=ctx_data, resolver=resolver)
+    assert hover is not None
+    assert "bool" in hover.contents.value
+
+
+def test_tuple_unpack_infers_individual_types():
+    code = "\n".join(
+        [
+            "x, y = character(), combat()",
+            "x.",
+            "y.",
+        ]
+    )
+    items_x = completion_items_for_position(code, line=1, character=len("x."), suggestions=[])
+    labels_x = {item.label for item in items_x}
+    assert "levels" in labels_x
+
+    items_y = completion_items_for_position(code, line=2, character=len("y."), suggestions=[])
+    labels_y = {item.label for item in items_y}
+    assert "get_combatant" in labels_y
 
 
 @pytest.mark.parametrize(

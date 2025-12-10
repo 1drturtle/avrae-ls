@@ -179,6 +179,7 @@ TYPE_SPECS: list[TypeSpec] = [
     TypeSpec("SimpleEffect", SimpleEffect, parents=("combatant", "SimpleCombatant")),
     TypeSpec("list", _BuiltinList),
     TypeSpec("int", int),
+    TypeSpec("float", float),
     TypeSpec("dict", _BuiltinDict, safe_methods=("get",)),
     TypeSpec("str", _BuiltinStr),
     TypeSpec("ParsedArguments", ParsedArguments),
@@ -786,6 +787,22 @@ def _sanitize_incomplete_line(code: str, line: int, character: int) -> str:
         try:
             ast.parse(candidate)
         except SyntaxError:
+            # Neutralize later lines with trailing dots to avoid parse failures unrelated to the target line.
+            changed = False
+            for idx in range(len(lines)):
+                if idx == line:
+                    continue
+                if lines[idx].rstrip().endswith("."):
+                    lines[idx] = "pass"
+                    changed = True
+            if changed:
+                candidate = "\n".join(lines)
+                try:
+                    ast.parse(candidate)
+                except SyntaxError:
+                    pass
+                else:
+                    return candidate
             indent = re.match(r"[ \t]*", lines[line]).group(0)
             lines[line] = indent + "pass"
     return "\n".join(lines)
@@ -800,7 +817,12 @@ def _line_text(code: str, line: int) -> str:
 
 def _display_type_label(type_key: str) -> str:
     cls = _type_cls(type_key)
-    return cls.__name__ if cls else type_key
+    if cls is None:
+        return type_key
+    name = cls.__name__
+    if name.startswith("_Builtin"):
+        return type_key
+    return name
 
 
 def _split_annotation_string(text: str) -> tuple[Optional[str], Optional[str]]:
@@ -819,6 +841,8 @@ def _split_annotation_string(text: str) -> tuple[Optional[str], Optional[str]]:
 def _annotation_types(node: ast.AST | None) -> tuple[Optional[str], Optional[str]]:
     if node is None:
         return None, None
+    if isinstance(node, str):
+        return _split_annotation_string(node)
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return _split_annotation_string(node.value)
     if isinstance(node, ast.Str):
@@ -842,7 +866,7 @@ def _infer_receiver_type(code: str, name: str, line: int | None = None) -> Optio
 
 def _infer_type_map(code: str, line: int | None = None) -> Dict[str, str]:
     try:
-        tree = ast.parse(code)
+        tree = ast.parse(code, type_comments=True)
     except SyntaxError:
         return {}
     visitor = _TypeInferencer(code)
@@ -886,6 +910,10 @@ class _TypeInferencer(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign):
         val_type, elem_type = self._value_type(node.value)
+        if getattr(node, "type_comment", None):
+            ann_type, ann_elem = _annotation_types(node.type_comment)
+            val_type = ann_type or val_type
+            elem_type = ann_elem or elem_type
         for target in node.targets:
             self._bind_target(target, val_type, elem_type, node.value)
         self.generic_visit(node)
@@ -895,6 +923,10 @@ class _TypeInferencer(ast.NodeVisitor):
         ann_type, ann_elem = _annotation_types(getattr(node, "annotation", None))
         val_type = val_type or ann_type
         elem_type = elem_type or ann_elem
+        if getattr(node, "type_comment", None):
+            c_type, c_elem = _annotation_types(node.type_comment)
+            val_type = val_type or c_type
+            elem_type = elem_type or c_elem
         self._bind_target(node.target, val_type, elem_type, node.value)
         self.generic_visit(node)
 
@@ -991,8 +1023,13 @@ class _TypeInferencer(ast.NodeVisitor):
             if source is not None:
                 self._record_dict_key_types(target.id, source)
         elif isinstance(target, (ast.Tuple, ast.List)):
-            for elt in target.elts:
-                self._bind_target(elt, val_type, elem_type, source)
+            if isinstance(source, (ast.Tuple, ast.List)) and len(source.elts or []) == len(target.elts):
+                for elt, val_node in zip(target.elts, source.elts):
+                    elt_type, elt_elem = self._value_type(val_node)
+                    self._bind_target(elt, elt_type, elt_elem, val_node)
+            else:
+                for elt in target.elts:
+                    self._bind_target(elt, val_type, elem_type, source)
 
     def _bind_function_args(self, args: ast.arguments) -> None:
         for arg in getattr(args, "posonlyargs", []):
@@ -1034,7 +1071,7 @@ class _TypeInferencer(ast.NodeVisitor):
                     return "ParsedArguments", None
                 if value.func.id == "range":
                     return "range", "int"
-                if value.func.id in {"list", "dict", "str"}:
+                if value.func.id in {"list", "dict", "str", "int", "float"}:
                     return value.func.id, None
             if isinstance(value.func, ast.Attribute):
                 base_type, base_elem = self._value_type(value.func.value)
@@ -1045,6 +1082,8 @@ class _TypeInferencer(ast.NodeVisitor):
                         return val_type, elem_type
                     if base_elem:
                         return base_elem, None
+        if isinstance(value, ast.Compare):
+            return "bool", None
         if isinstance(value, ast.List):
             elem_type, _ = self._iterable_element_from_values(value.elts)
             return "list", elem_type

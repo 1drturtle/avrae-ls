@@ -9,10 +9,8 @@ import random
 import re
 import time
 from types import SimpleNamespace
-try:  # optional dependency
-    import yaml
-except ImportError:  # pragma: no cover - fallback when PyYAML is absent
-    yaml = None  # type: ignore
+from collections import UserList
+import yaml
 from dataclasses import dataclass
 from typing import Any, Dict, Set, Callable
 
@@ -64,6 +62,13 @@ class MockNamespace:
         return dict(self._data)
 
 
+class ModuleExecutionError(Exception):
+    def __init__(self, module: str, original: BaseException):
+        super().__init__(f"Error in module {module}: {original}")
+        self.module = module
+        self.original = original
+
+
 @dataclass
 class ExecutionResult:
     stdout: str
@@ -78,6 +83,59 @@ def _roll_dice(dice: str) -> int:
     except d20.RollError:
         return 0
     return result.total
+
+
+def _load_yaml(data: Any) -> Any:
+    """Parse YAML, accepting JSON."""
+    if data is None:
+        return None
+    if isinstance(data, (dict, list, tuple, set)):
+        return data
+    text = str(data)
+    return yaml.safe_load(text)
+
+
+def _yaml_dumper():
+    """Create a dumper that knows how to serialize draconic SafeList/SafeDict/SafeSet."""
+    class DraconicDumper(yaml.SafeDumper):
+        pass
+
+    def _represent_user_list(dumper: yaml.Dumper, data: UserList):
+        return dumper.represent_sequence(dumper.DEFAULT_SEQUENCE_TAG, list(data))
+
+    def _represent_dict(dumper: yaml.Dumper, data: dict):
+        return dumper.represent_dict(dict(data))
+
+    def _represent_set(dumper: yaml.Dumper, data: set):
+        return dumper.represent_sequence(dumper.DEFAULT_SEQUENCE_TAG, list(data))
+
+    DraconicDumper.add_multi_representer(UserList, _represent_user_list)
+    DraconicDumper.add_multi_representer(dict, _represent_dict)
+    DraconicDumper.add_multi_representer(set, _represent_set)
+    return DraconicDumper
+
+
+_YAML_DUMPER = _yaml_dumper()
+
+
+def _dump_yaml(obj: Any, indent: int = 2) -> str:
+    return yaml.dump(obj, Dumper=_YAML_DUMPER, default_flow_style=False, indent=indent, sort_keys=False)
+
+
+def _json_default(obj: Any) -> Any:
+    """Coerce SafeList/SafeDict or other iterables into JSON-serializable forms."""
+    try:
+        if hasattr(obj, "to_dict"):
+            return obj.to_dict()
+        if isinstance(obj, dict):
+            return dict(obj)
+        if isinstance(obj, (list, tuple, set)):
+            return list(obj)
+        if hasattr(obj, "__iter__") and not isinstance(obj, (str, bytes)):
+            return list(obj)
+    except Exception:
+        pass
+    return str(obj)
 
 
 def _vroll_dice(dice: str, multiply: int = 1, add: int = 0) -> SimpleRollResult | None:
@@ -214,11 +272,9 @@ def _default_builtins() -> Dict[str, Any]:
         "typeof": lambda inst: type(inst).__name__,
         "parse_coins": _parse_coins,
         "load_json": lambda s: json.loads(str(s)),
-        "dump_json": lambda obj: json.dumps(obj),
-        "load_yaml": lambda s: yaml.safe_load(str(s)) if yaml else None,
-        "dump_yaml": (
-            (lambda obj, indent=2: yaml.safe_dump(obj, indent=indent, sort_keys=False)) if yaml else (lambda obj, indent=2: str(obj))
-        ),
+        "dump_json": lambda obj: json.dumps(obj, default=_json_default),
+        "load_yaml": _load_yaml,
+        "dump_yaml": _dump_yaml,
     }
 
 
@@ -321,6 +377,8 @@ class MockExecutor:
 
         if resolver:
             await _ensure_literal_gvars(code_to_run, resolver)
+            await _ensure_nested_gvars(resolver)
+            await _ensure_nested_gvars(resolver)
 
         try:
             interpreter._preflight()
@@ -422,6 +480,12 @@ class MockExecutor:
                     raise ModuleNotFoundError(f"No gvar named {addr!r}")
                 mod_contents = resolver.get_local(addr)
                 if mod_contents is None:
+                    try:
+                        resolver.ensure_blocking(addr)
+                    except Exception as exc:  # pragma: no cover - defensive
+                        log.debug("Blocking gvar fetch failed for %s: %s", addr, exc)
+                    mod_contents = resolver.get_local(addr)
+                if mod_contents is None:
                     raise ModuleNotFoundError(f"No gvar named {addr!r}")
 
                 old_names = getattr(interp, "_names", {})
@@ -432,7 +496,10 @@ class MockExecutor:
                     depth_increased = True
                     if interp._depth > interp._config.max_recursion_depth:
                         raise RecursionError("Maximum recursion depth exceeded")
-                    interp.execute_module(str(mod_contents), module_name=addr)
+                    try:
+                        interp.execute_module(str(mod_contents), module_name=addr)
+                    except Exception as exc:
+                        raise ModuleExecutionError(addr, exc) from exc
                     mod_ns = SimpleNamespace(**getattr(interp, "_names", {}))
                     import_cache[addr] = mod_ns
                     return mod_ns
@@ -619,11 +686,37 @@ def _wrap_draconic(code: str) -> tuple[str, int]:
 
 
 async def _ensure_literal_gvars(code: str, resolver: GVarResolver) -> None:
-    for key in _literal_gvars(code):
-        try:
-            await resolver.ensure(key)
-        except Exception as exc:  # pragma: no cover - defensive
-            log.debug("Failed to prefetch gvar %s: %s", key, exc)
+    keys = _literal_gvars(code)
+    try:
+        await resolver.ensure_many(keys)
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("Failed to prefetch gvars %s: %s", keys, exc)
+
+
+async def _ensure_nested_gvars(resolver: GVarResolver) -> None:
+    """Recursively prefetch gvars referenced by already-fetched gvar modules."""
+    visited: set[str] = set()
+    while True:
+        snapshot = resolver.snapshot()
+        newly_fetched: set[str] = set()
+        for key, value in snapshot.items():
+            if key in visited:
+                continue
+            visited.add(key)
+            if not isinstance(value, str):
+                continue
+            for nested in _literal_gvars(value):
+                if nested in snapshot or nested in newly_fetched:
+                    continue
+                try:
+                    results = await resolver.ensure_many([nested])
+                except Exception as exc:  # pragma: no cover - defensive
+                    log.debug("Failed to prefetch nested gvar %s: %s", nested, exc)
+                    continue
+                if results.get(nested):
+                    newly_fetched.add(nested)
+        if not newly_fetched:
+            break
 
 
 def _literal_gvars(code: str) -> Set[str]:

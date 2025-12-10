@@ -256,6 +256,9 @@ def _validate_color_arg(value: str | None) -> Tuple[bool, str | None, int]:
     if value is None or value.startswith("-"):
         # Random color is allowed when omitted
         return True, None, 0
+    if str(value).strip().lower() == "<color>":
+        # Avrae placeholder accepted
+        return True, None, 1
     if not re.match(r"^(?:#|0x)?[0-9a-fA-F]{6}$", value):
         return False, "Embed color must be a 6-hex value (e.g. #ff00ff).", 1
     return True, None, 1
@@ -289,6 +292,8 @@ def _normalize_color(value: str | None) -> str | None:
         return None
     if not value:
         return None
+    if str(value).strip().lower() == "<color>":
+        return "<color>"
     match = re.match(r"^(?:#|0x)?([0-9a-fA-F]{6})$", value)
     if not match:
         return value

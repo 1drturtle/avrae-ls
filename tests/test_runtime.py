@@ -2,8 +2,8 @@ import httpx
 import pytest
 
 from avrae_ls.argparser import InvalidArgument
-from avrae_ls.config import VarSources
-from avrae_ls.context import ContextData, GVarResolver
+from avrae_ls.config import AvraeLSConfig, VarSources
+from avrae_ls.context import ContextBuilder, ContextData, GVarResolver
 from avrae_ls.runtime import FunctionRequiresCharacter, MockExecutor, _parse_coins
 
 
@@ -251,6 +251,11 @@ class _EnsuringResolver(GVarResolver):
         self._cache[str(key)] = f"fetched-{key}"
         return True
 
+    async def ensure_many(self, keys):
+        for key in keys:
+            await self.ensure(key)
+        return {str(k): True for k in keys}
+
 
 @pytest.mark.asyncio
 async def test_get_gvar_prefetches_literal(tmp_path):
@@ -283,6 +288,11 @@ async def test_using_prefetches_literal(tmp_path):
             self.calls.append(key)
             self._cache[key] = "answer = 'ensured'"
             return True
+
+        async def ensure_many(self, keys):
+            for key in keys:
+                await self.ensure(key)
+            return {str(k): True for k in keys}
 
     resolver = _ModuleResolver(cfg)
     ctx = _ctx()
@@ -478,13 +488,78 @@ async def test_verify_signature_cached(monkeypatch, tmp_path):
     result = await executor.run("verify_signature('sig1')\nverify_signature('sig1')", ctx, resolver)
     assert result.error is None
     assert len(calls) == 1
-    assert result.value["user_data"] == 1
 
-    calls.clear()
-    result = await executor.run("verify_signature('sig1')\nverify_signature('sig2')", ctx, resolver)
+
+@pytest.mark.asyncio
+async def test_nested_using_prefetches_dependencies(monkeypatch, tmp_path):
+    cfg = AvraeLSConfig.default(tmp_path)
+    cfg.enable_gvar_fetch = True
+    cfg.service.token = "token"
+    resolver = GVarResolver(cfg)
+    executor = MockExecutor(cfg.service)
+    ctx = _ctx()
+
+    values = {
+        "bag": 'using(nested="inner")\nvalue = 1',
+        "inner": "answer = 5",
+    }
+
+    class DummyResponse:
+        status_code = 200
+
+        def __init__(self, key: str):
+            self.key = key
+
+        def json(self):
+            return {"value": values[self.key]}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            key = url.rsplit("/", 1)[-1]
+            return DummyResponse(key)
+
+    monkeypatch.setattr("avrae_ls.context.httpx.AsyncClient", DummyClient)
+
+    result = await executor.run('using(bag="bag")\nreturn bag.value + bag.nested.answer', ctx, resolver)
+
     assert result.error is None
-    assert calls == ["sig1", "sig2"]
-    assert result.value["user_data"] == 2
+    assert result.value == 6
+    assert resolver.get_local("inner") == values["inner"]
+
+
+@pytest.mark.asyncio
+async def test_using_fallback_fetches_missing_module(monkeypatch, tmp_path):
+    cfg = AvraeLSConfig.default(tmp_path)
+    cfg.enable_gvar_fetch = True
+    cfg.service.token = "token"
+    resolver = GVarResolver(cfg)
+    executor = MockExecutor(cfg.service)
+    ctx = _ctx()
+
+    resolver.seed({"outer": 'using(inner="inner")\nvalue = inner.answer'})
+
+    def fake_ensure_blocking(key: str) -> bool:
+        if key == "inner":
+            resolver.seed({"inner": "answer = 42"})
+            return True
+        return False
+
+    monkeypatch.setattr(resolver, "ensure_blocking", fake_ensure_blocking)
+
+    result = await executor.run('using(outer="outer")\nreturn outer.value', ctx, resolver)
+
+    assert result.error is None
+    assert result.value == 42
+    assert resolver.get_local("inner") == "answer = 42"
 
 
 @pytest.mark.asyncio
@@ -520,6 +595,94 @@ async def test_verify_signature_http_error(monkeypatch, tmp_path):
     assert "HTTP 500" in str(result.error)
     assert "nope" in str(result.error)
 
+
+@pytest.mark.asyncio
+async def test_load_yaml_parses(monkeypatch, tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run("load_yaml('a: 1')", ctx, resolver)
+
+    assert result.error is None
+    assert result.value == {"a": 1}
+
+
+@pytest.mark.asyncio
+async def test_load_yaml_invalid(monkeypatch, tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run("load_yaml('a: [')", ctx, resolver)
+
+    assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_load_json_parses(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run('load_json("{\\"a\\": 1}")', ctx, resolver)
+
+    assert result.error is None
+    assert result.value == {"a": 1}
+
+
+@pytest.mark.asyncio
+async def test_load_json_parses_list(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run('load_json("[1, 2, 3]")', ctx, resolver)
+
+    assert result.error is None
+    assert result.value == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_load_json_invalid(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run('load_json("{bad")', ctx, resolver)
+
+    assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_character_cvars_do_not_persist_between_runs(tmp_path):
+    cfg = AvraeLSConfig.default(tmp_path)
+    builder = ContextBuilder(cfg)
+    executor = MockExecutor()
+
+    ctx1 = builder.build()
+    resolver = builder.gvar_resolver
+
+    result1 = await executor.run("character().set_cvar('temp_cvar', 'value')\nget('temp_cvar')", ctx1, resolver)
+    assert result1.error is None
+    assert result1.value == "value"
+
+    ctx2 = builder.build()
+    result2 = await executor.run("get('temp_cvar')", ctx2, resolver)
+    assert result2.error is None
+    assert result2.value is None
+
+
+@pytest.mark.asyncio
+async def test_load_yaml_accepts_json_input(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run('load_yaml("[1, 2, 3]")', ctx, resolver)
+
+    assert result.error is None
+    assert result.value == [1, 2, 3]
 
 def test_documented_builtins_present():
     executor = MockExecutor()

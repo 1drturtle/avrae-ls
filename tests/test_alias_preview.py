@@ -121,6 +121,12 @@ def test_validate_embed_field_format():
     assert "field must be" in err.lower()
 
 
+def test_validate_embed_color_placeholder():
+    ok, err = validate_embed_payload("-color <color>")
+    assert ok
+    assert err is None
+
+
 def test_simulate_command_returns_embed_preview():
     payload = '-title "Hello" -desc "World" -color #ABCDEF -t 30 -thumb http://thumb -image http://image -footer "Footer" -f "Name|Value|inline"'
     simulated = simulate_command(f"embed {payload}")

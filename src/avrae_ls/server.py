@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+import ast
 from typing import Any, Dict
 from importlib import metadata
 
@@ -279,6 +280,7 @@ async def run_alias(server: AvraeLanguageServer, *args: Any):
     text = None
     profile = None
     alias_args: list[str] | None = None
+    doc = None
     if isinstance(payload, dict):
         uri = payload.get("uri")
         text = payload.get("text")
@@ -315,10 +317,25 @@ async def run_alias(server: AvraeLanguageServer, *args: Any):
         response["validationError"] = preview.validation_error
     if preview.embed:
         response["embed"] = preview.embed.to_dict()
+    response["state"] = {
+        "character": ctx_data.character,
+        "combat": ctx_data.combat,
+        "vars": {
+            "cvars": dict(ctx_data.vars.cvars),
+            "uvars": dict(ctx_data.vars.uvars),
+            "svars": dict(ctx_data.vars.svars),
+            "gvars": dict(ctx_data.vars.gvars),
+        },
+    }
     if uri:
         extra = []
         if rendered.error:
-            extra.append(_runtime_diagnostic(rendered.error, server.state.config.diagnostics.runtime_level))
+            src = doc.source if doc else text
+            extra.append(
+                _runtime_diagnostic_with_source(
+                    rendered.error, server.state.config.diagnostics.runtime_level, src
+                )
+            )
         await _publish_diagnostics(server, uri, profile=profile, extra=extra)
     return response
 
@@ -371,7 +388,15 @@ def _format_runtime_error(error: BaseException) -> str:
 
 
 def _runtime_diagnostic(error: BaseException, level: str) -> types.Diagnostic:
+    return _runtime_diagnostic_with_source(error, level, None)
+
+
+def _runtime_diagnostic_with_source(error: BaseException, level: str, source: str | None) -> types.Diagnostic:
     severity = LEVEL_TO_SEVERITY.get(level.lower(), types.DiagnosticSeverity.Error)
+    if source and hasattr(error, "module"):
+        rng = _find_using_range(source, getattr(error, "module", None))
+        if rng:
+            return types.Diagnostic(message=str(error), range=rng, severity=severity, source="avrae-ls-runtime")
     if isinstance(error, draconic.DraconicSyntaxError):
         rng = types.Range(
             start=types.Position(line=max((error.lineno or 1) - 1, 0), character=max((error.offset or 1) - 1, 0)),
@@ -398,6 +423,24 @@ def _runtime_diagnostic(error: BaseException, level: str) -> types.Diagnostic:
         )
         message = str(error)
     return types.Diagnostic(message=message, range=rng, severity=severity, source="avrae-ls-runtime")
+
+
+def _find_using_range(source: str, module: str | None) -> types.Range | None:
+    if not module:
+        return None
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "using":
+            for kw in node.keywords:
+                if kw.arg and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                    if kw.value.value == module:
+                        start = types.Position(line=node.lineno - 1, character=node.col_offset)
+                        end = types.Position(line=node.end_lineno - 1, character=node.end_col_offset)
+                        return types.Range(start=start, end=end)
+    return None
 
 
 def create_server() -> AvraeLanguageServer:

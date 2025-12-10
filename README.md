@@ -27,6 +27,35 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
 - Tests only (with coverage): `make test` or `uv run pytest tests --cov=src`.
 - CLI smoke test without installing: `uv run python -m avrae_ls --analyze path/to/alias.txt`.
 
+## Alias tests
+
+- Create files ending with `.alias-test` (or `.aliastest`) next to your alias file. Each test starts with an invocation, followed by `---` and the expected result; you can stack multiple tests in one file by repeating this pattern (optional metadata after a second `---` per test).
+  ```
+  !my-alias -b example args
+  ---
+  expected text or number
+  ```
+- For embed aliases, put a YAML/JSON dictionary after the separator to compare against the embed preview (partial dictionaries are allowed).
+  ```
+  !embedtest
+  ---
+  title: Hello
+  description: World
+  ```
+- Embed fields lists can be partial: only the listed fields (in order) are matched; extra fields in the alias do not fail the test.
+- Use regex expectations by wrapping strings in `/.../` (or `re:...`). You can also mix literals with regex segments (e.g., `Hello /world.*/`) so only the delimited part is treated as regex.
+- Optional second `---` section can carry metadata:
+  ``` 
+  name: critical-hit
+  vars:
+    cvars:
+      hp: 12
+  character:
+    name: Tester
+  ```
+  `name` is a label for reporting, `vars` are merged into cvars/uvars/svars/gvars, and `character` keys are deep-merged into the mock character.
+- Run them with `avrae-ls --run-tests [path]` (defaults to the current directory); non-zero exit codes indicate failures.
+
 ## Runtime differences (mock vs. live Avrae)
 
 - Mock execution never writes back to Avrae: cvar/uvar/gvar mutations only live for the current run and reset before the next.

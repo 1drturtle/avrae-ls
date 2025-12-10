@@ -7,8 +7,11 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
+import yaml
+
 from lsprotocol import types
 
+from .alias_tests import AliasTestError, AliasTestResult, discover_test_files, parse_alias_tests, run_alias_tests
 from .config import CONFIG_FILENAME, load_config
 from .context import ContextBuilder
 from .diagnostics import DiagnosticProvider
@@ -24,6 +27,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--stdio", action="store_true", help="Accept stdio flag for VS Code clients (ignored)")
     parser.add_argument("--log-level", default="WARNING", help="Logging level (DEBUG, INFO, WARNING, ERROR)")
     parser.add_argument("--analyze", metavar="FILE", help="Run diagnostics for a file and print them to stdout")
+    parser.add_argument(
+        "--run-tests",
+        metavar="PATH",
+        nargs="?",
+        const=".",
+        help="Run alias tests in PATH (defaults to current directory)",
+    )
     parser.add_argument("--version", action="store_true", help="Print version and exit")
     args = parser.parse_args(argv)
 
@@ -32,6 +42,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.version:
         print(__version__)
         return
+
+    if args.run_tests is not None:
+        if args.tcp:
+            parser.error("--run-tests cannot be combined with --tcp")
+        if args.analyze:
+            parser.error("--run-tests cannot be combined with --analyze")
+        sys.exit(_run_alias_tests(Path(args.run_tests)))
 
     if args.analyze:
         if args.tcp:
@@ -77,6 +94,86 @@ def _run_analysis(path: Path) -> int:
     results = asyncio.run(diagnostics.analyze(source, ctx_data, builder.gvar_resolver))
     _print_diagnostics(path, results)
     return 1 if results else 0
+
+
+def _run_alias_tests(target: Path) -> int:
+    if not target.exists():
+        print(f"Test path not found: {target}", file=sys.stderr)
+        return 2
+
+    workspace_root = _discover_workspace_root(target)
+    log = logging.getLogger(__name__)
+    log.info("Running alias tests in %s (workspace root: %s)", target, workspace_root)
+
+    config, warnings = load_config(workspace_root)
+    for warning in warnings:
+        log.warning(warning)
+
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    test_files = discover_test_files(target)
+    cases = []
+    parse_errors: list[str] = []
+    for test_file in test_files:
+        try:
+            cases.extend(parse_alias_tests(test_file))
+        except AliasTestError as exc:
+            parse_errors.append(str(exc))
+
+    if parse_errors:
+        for err in parse_errors:
+            print(err, file=sys.stderr)
+    if not cases:
+        print(f"No alias tests found under {target}")
+        return 1 if parse_errors else 0
+
+    results = asyncio.run(run_alias_tests(cases, builder, executor))
+    _print_test_results(results, workspace_root)
+
+    failures = [res for res in results if not res.passed]
+    return 1 if failures or parse_errors else 0
+
+
+def _print_test_results(results: Iterable[AliasTestResult], workspace_root: Path) -> None:
+    total = len(results)
+    passed = 0
+    for res in results:
+        rel = _relative_to_workspace(res.case.path, workspace_root)
+        label = f"{rel} ({res.case.name})" if res.case.name else rel
+        status = "PASS" if res.passed else "FAIL"
+        print(f"[{status}] {label} (alias: {res.case.alias_name})")
+        if res.passed:
+            if res.stdout:
+                print(f"  Stdout: {res.stdout.strip()}")
+            passed += 1
+            continue
+        if res.error:
+            print(f"  Error: {res.error}")
+        if res.details:
+            print(f"  {res.details}")
+        expected = _format_value(res.case.expected)
+        actual = _format_value(res.actual)
+        print(f"  Expected: {expected}")
+        print(f"  Actual:   {actual}")
+        if res.stdout:
+            print(f"  Stdout: {res.stdout.strip()}")
+    print(f"{passed}/{total} tests passed")
+
+
+def _relative_to_workspace(path: Path, workspace_root: Path) -> str:
+    try:
+        return str(path.relative_to(workspace_root))
+    except ValueError:
+        return str(path)
+
+
+def _format_value(value) -> str:
+    if value is None:
+        return "None"
+    if isinstance(value, (dict, list)):
+        return (yaml.safe_dump(value, sort_keys=False) or "").strip()
+    return str(value)
 
 
 def _discover_workspace_root(target: Path) -> Path:

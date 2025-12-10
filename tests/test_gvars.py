@@ -74,6 +74,9 @@ async def test_missing_gvar_fetches_when_enabled(monkeypatch):
             captured["headers"] = headers or {}
             return DummyResponse()
 
+        async def aclose(self):
+            return None
+
     monkeypatch.setattr("avrae_ls.context.httpx.AsyncClient", DummyClient)
 
     fetched = await resolver.ensure("abc123")
@@ -82,3 +85,94 @@ async def test_missing_gvar_fetches_when_enabled(monkeypatch):
     assert resolver.get_local("abc123") == DummyResponse.text
     assert captured["url"].endswith("/customizations/gvars/abc123")
     assert captured["headers"].get("Authorization") == "token"
+
+
+@pytest.mark.asyncio
+async def test_ensure_many_fetches_concurrently(monkeypatch):
+    cfg = AvraeLSConfig.default(Path("."))
+    cfg.enable_gvar_fetch = True
+    cfg.service.token = "token"
+    resolver = GVarResolver(cfg)
+
+    calls: list[str] = []
+
+    class DummyResponse:
+        status_code = 200
+
+        def __init__(self, key: str):
+            self.key = key
+
+        def json(self):
+            return {"value": f"val:{self.key}"}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            key = url.rsplit("/", 1)[-1]
+            calls.append(key)
+            return DummyResponse(key)
+
+    monkeypatch.setattr("avrae_ls.context.httpx.AsyncClient", DummyClient)
+
+    results = await resolver.ensure_many(["a", "b"])
+
+    assert results == {"a": True, "b": True}
+    assert resolver.get_local("a") == "val:a"
+    assert resolver.get_local("b") == "val:b"
+    assert set(calls) == {"a", "b"}
+
+
+@pytest.mark.asyncio
+async def test_refresh_fetches_multiple_when_enabled(monkeypatch):
+    cfg = AvraeLSConfig.default(Path("."))
+    cfg.enable_gvar_fetch = True
+    cfg.service.token = "token"
+    resolver = GVarResolver(cfg)
+
+    captured = {"urls": [], "headers": []}
+
+    class DummyResponse:
+        status_code = 200
+
+        def __init__(self, key: str):
+            self.value = f"value:{key}"
+
+        def json(self):
+            return {"value": self.value}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            key = url.rsplit("/", 1)[-1]
+            captured["urls"].append(url)
+            captured["headers"].append(headers or {})
+            return DummyResponse(key)
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr("avrae_ls.context.httpx.AsyncClient", DummyClient)
+
+    snapshot = await resolver.refresh({"seed": "present"}, keys=["g1", "g2"])
+
+    assert snapshot["seed"] == "present"
+    assert snapshot["g1"] == "value:g1"
+    assert snapshot["g2"] == "value:g2"
+    assert len(captured["urls"]) == 2
+    assert captured["headers"] == [{"Authorization": "token"}, {"Authorization": "token"}]
