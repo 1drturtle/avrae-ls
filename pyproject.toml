@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "avrae-ls"
-version = "0.6.0"
+version = "0.6.1"
 description = "Language server for Avrae draconic aliases"
 authors = [
   { name = "1drturtle" }
@@ -36,6 +36,8 @@ packages = ["src/avrae_ls", "src/draconic"]
 
 [tool.hatch.build]
 include = [
+    "src/avrae_ls",
+    "src/draconic",
     "src/draconic/LICENSE",
 ]
 
