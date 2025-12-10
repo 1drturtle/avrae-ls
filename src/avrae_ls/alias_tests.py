@@ -13,6 +13,8 @@ from .context import ContextBuilder
 from .runtime import MockExecutor
 from .config import VarSources
 
+MISSING_VALUE = "<missing>"
+
 
 class AliasTestError(Exception):
     """Raised when an alias test cannot be parsed or executed."""
@@ -222,6 +224,44 @@ def _value_matches(expected: Any, actual: Any) -> bool:
             return False
         return all(_value_matches(e, actual[idx]) for idx, e in enumerate(expected))
     return _scalar_matches(expected, actual)
+
+
+def diff_mismatched_parts(expected: Any, actual: Any) -> tuple[Any, Any] | None:
+    if _value_matches(expected, actual):
+        return None
+
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        expected_diff: dict[str, Any] = {}
+        actual_diff: dict[str, Any] = {}
+        for key, expected_val in expected.items():
+            if key not in actual:
+                expected_diff[key] = expected_val
+                actual_diff[key] = MISSING_VALUE
+                continue
+            sub_diff = diff_mismatched_parts(expected_val, actual[key])
+            if sub_diff:
+                expected_diff[key], actual_diff[key] = sub_diff
+        if expected_diff:
+            return expected_diff, actual_diff
+        return expected, actual
+
+    if isinstance(expected, list) and isinstance(actual, list):
+        expected_diff: list[Any] = []
+        actual_diff: list[Any] = []
+        for idx, expected_val in enumerate(expected):
+            if idx >= len(actual):
+                expected_diff.append(expected_val)
+                actual_diff.append(MISSING_VALUE)
+                continue
+            sub_diff = diff_mismatched_parts(expected_val, actual[idx])
+            if sub_diff:
+                expected_diff.append(sub_diff[0])
+                actual_diff.append(sub_diff[1])
+        if expected_diff:
+            return expected_diff, actual_diff
+        return expected, actual
+
+    return expected, actual
 
 
 def _split_command(command: str, path: Path) -> list[str]:

@@ -2,16 +2,24 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import difflib
 import logging
 import sys
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import yaml
 
 from lsprotocol import types
 
-from .alias_tests import AliasTestError, AliasTestResult, discover_test_files, parse_alias_tests, run_alias_tests
+from .alias_tests import (
+    AliasTestError,
+    AliasTestResult,
+    diff_mismatched_parts,
+    discover_test_files,
+    parse_alias_tests,
+    run_alias_tests,
+)
 from .config import CONFIG_FILENAME, load_config
 from .context import ContextBuilder
 from .diagnostics import DiagnosticProvider
@@ -81,7 +89,7 @@ def _run_analysis(path: Path) -> int:
     log = logging.getLogger(__name__)
     log.info("Analyzing %s (workspace root: %s)", path, workspace_root)
 
-    config, warnings = load_config(workspace_root)
+    config, warnings = load_config(workspace_root, default_enable_gvar_fetch=True)
     for warning in warnings:
         log.warning(warning)
 
@@ -152,13 +160,67 @@ def _print_test_results(results: Iterable[AliasTestResult], workspace_root: Path
             print(f"  Error: {res.error}")
         if res.details:
             print(f"  {res.details}")
-        expected = _format_value(res.case.expected)
-        actual = _format_value(res.actual)
-        print(f"  Expected: {expected}")
-        print(f"  Actual:   {actual}")
+        expected_val, actual_val = _summarize_mismatch(res.case.expected, res.actual)
+        expected = _format_value(expected_val)
+        actual = _format_value(actual_val)
+        _print_labeled_value("Expected", expected)
+        _print_labeled_value("Actual", actual)
+        diff = _render_diff(expected, actual)
+        if diff:
+            print("  Diff:")
+            for line in diff.splitlines():
+                print(f"    {line}")
         if res.stdout:
             print(f"  Stdout: {res.stdout.strip()}")
     print(f"{passed}/{total} tests passed")
+
+
+def _summarize_mismatch(expected: Any, actual: Any) -> tuple[Any, Any]:
+    diff = diff_mismatched_parts(expected, actual)
+    if diff is None:
+        return expected, actual
+    return diff
+
+
+def _render_diff(expected: str, actual: str) -> str:
+    expected_lines = expected.splitlines() or [""]
+    actual_lines = actual.splitlines() or [""]
+    if expected_lines == actual_lines:
+        return ""
+    diff_lines = list(
+        difflib.unified_diff(
+            expected_lines,
+            actual_lines,
+            fromfile="expected",
+            tofile="actual",
+            lineterm="",
+        )
+    )
+    if not diff_lines:
+        return ""
+    return "\n".join(_colorize_diff_line(line) for line in diff_lines)
+
+
+def _colorize_diff_line(line: str) -> str:
+    if not sys.stdout.isatty():
+        return line
+    if line.startswith("-"):
+        return f"\x1b[31m{line}\x1b[0m"
+    if line.startswith("+"):
+        return f"\x1b[32m{line}\x1b[0m"
+    if line.startswith("@@") or line.startswith("---") or line.startswith("+++"):
+        return f"\x1b[36m{line}\x1b[0m"
+    return line
+
+
+def _print_labeled_value(label: str, value: str) -> None:
+    lines = value.splitlines() or [""]
+    if len(lines) == 1:
+        print(f"  {label}: {lines[0]}")
+        return
+    print(f"  {label}:")
+    for line in lines:
+        print(f"    {line}")
 
 
 def _relative_to_workspace(path: Path, workspace_root: Path) -> str:
@@ -168,7 +230,7 @@ def _relative_to_workspace(path: Path, workspace_root: Path) -> str:
         return str(path)
 
 
-def _format_value(value) -> str:
+def _format_value(value: Any) -> str:
     if value is None:
         return "None"
     if isinstance(value, (dict, list)):

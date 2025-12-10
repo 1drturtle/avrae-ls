@@ -387,11 +387,16 @@ def _coerce_optional_str(value: Any) -> str | None:
     return value_str if value_str.strip() else None
 
 
-def load_config(workspace_root: Path) -> Tuple[AvraeLSConfig, Iterable[str]]:
+def load_config(workspace_root: Path, *, default_enable_gvar_fetch: bool = False) -> Tuple[AvraeLSConfig, Iterable[str]]:
     """Load `.avraels.json` from the workspace root, returning config and warnings."""
     path = workspace_root / CONFIG_FILENAME
     if not path.exists():
-        return AvraeLSConfig.default(workspace_root), []
+        cfg = AvraeLSConfig.default(workspace_root)
+        cfg.enable_gvar_fetch = default_enable_gvar_fetch
+        env_token = _coerce_optional_str(os.environ.get("AVRAE_TOKEN"))
+        if env_token:
+            cfg.service.token = env_token
+        return cfg, []
 
     try:
         raw = json.loads(path.read_text())
@@ -411,12 +416,13 @@ def load_config(workspace_root: Path) -> Tuple[AvraeLSConfig, Iterable[str]]:
         warnings.append(warning)
         log.warning(warning)
 
-    enable_gvar_fetch = bool(raw.get("enableGvarFetch", False))
+    enable_gvar_fetch = bool(raw.get("enableGvarFetch", default_enable_gvar_fetch))
 
     service_cfg = raw.get("avraeService") or {}
+    env_token = _coerce_optional_str(env.get("AVRAE_TOKEN"))
     service = AvraeServiceConfig(
         base_url=str(service_cfg.get("baseUrl") or AvraeServiceConfig.base_url),
-        token=_coerce_optional_str(service_cfg.get("token")),
+        token=_coerce_optional_str(service_cfg.get("token")) or env_token,
     )
 
     diag_cfg = raw.get("diagnostics") or {}
