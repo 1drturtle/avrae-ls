@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
-import logging
 import asyncio
 import copy
+import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable
@@ -318,6 +318,7 @@ class GVarResolver:
             return False
         self._cache[key] = value
         return True
+
 
 
 def _read_json_file(path: Path) -> Dict[str, Any] | None:

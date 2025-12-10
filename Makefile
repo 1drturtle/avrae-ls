@@ -10,7 +10,7 @@ BUMP ?= patch
 
 install:
 	$(UV) sync --all-extras
-	$(UV) tool install --force --no-binary --no-cache --from . avrae-ls
+	$(UV) tool install --force --no-cache --from . avrae-ls
 
 lint:
 	$(UV) run ruff check $(PY_SOURCES)

@@ -42,6 +42,8 @@ def main(argv: list[str] | None = None) -> None:
         const=".",
         help="Run alias tests in PATH (defaults to current directory)",
     )
+    parser.add_argument("--token", help="Avrae API token (overrides config)")
+    parser.add_argument("--base-url", help="Avrae API base URL (overrides config)")
     parser.add_argument("--version", action="store_true", help="Print version and exit")
     args = parser.parse_args(argv)
 
@@ -56,12 +58,12 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("--run-tests cannot be combined with --tcp")
         if args.analyze:
             parser.error("--run-tests cannot be combined with --analyze")
-        sys.exit(_run_alias_tests(Path(args.run_tests)))
+        sys.exit(_run_alias_tests(Path(args.run_tests), token_override=args.token, base_url_override=args.base_url))
 
     if args.analyze:
         if args.tcp:
             parser.error("--analyze cannot be combined with --tcp")
-        sys.exit(_run_analysis(Path(args.analyze)))
+        sys.exit(_run_analysis(Path(args.analyze), token_override=args.token, base_url_override=args.base_url))
 
     server = create_server()
     if args.tcp:
@@ -80,7 +82,7 @@ def _configure_logging(level: str) -> None:
     )
 
 
-def _run_analysis(path: Path) -> int:
+def _run_analysis(path: Path, *, token_override: str | None = None, base_url_override: str | None = None) -> int:
     if not path.exists():
         print(f"File not found: {path}", file=sys.stderr)
         return 2
@@ -90,6 +92,10 @@ def _run_analysis(path: Path) -> int:
     log.info("Analyzing %s (workspace root: %s)", path, workspace_root)
 
     config, warnings = load_config(workspace_root, default_enable_gvar_fetch=True)
+    if token_override:
+        config.service.token = token_override
+    if base_url_override:
+        config.service.base_url = base_url_override
     for warning in warnings:
         log.warning(warning)
 
@@ -104,7 +110,9 @@ def _run_analysis(path: Path) -> int:
     return 1 if results else 0
 
 
-def _run_alias_tests(target: Path) -> int:
+def _run_alias_tests(
+    target: Path, *, token_override: str | None = None, base_url_override: str | None = None
+) -> int:
     if not target.exists():
         print(f"Test path not found: {target}", file=sys.stderr)
         return 2
@@ -114,6 +122,10 @@ def _run_alias_tests(target: Path) -> int:
     log.info("Running alias tests in %s (workspace root: %s)", target, workspace_root)
 
     config, warnings = load_config(workspace_root, default_enable_gvar_fetch=True)
+    if token_override:
+        config.service.token = token_override
+    if base_url_override:
+        config.service.base_url = base_url_override
     for warning in warnings:
         log.warning(warning)
 
