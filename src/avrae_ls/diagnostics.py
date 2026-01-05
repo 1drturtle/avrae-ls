@@ -10,11 +10,14 @@ from lsprotocol import types
 
 from .alias_preview import simulate_command
 from .codes import MISSING_GVAR_CODE, UNDEFINED_NAME_CODE, UNSUPPORTED_IMPORT_CODE
-from .argument_parsing import apply_argument_parsing
-from .completions import _infer_type_map, _resolve_type_name, _type_meta
+from .source_context import build_source_context
+from .type_inference import infer_type_map, resolve_type_name
+from .type_system import type_meta
 from .config import DiagnosticSettings
 from .context import ContextData, GVarResolver
-from .parser import find_draconic_blocks
+from .parser import wrap_draconic
+from .lsp_utils import range_from_positions, shift_range
+from .ast_utils import collect_target_names
 from .runtime import MockExecutor, _default_builtins
 
 log = logging.getLogger(__name__)
@@ -42,15 +45,14 @@ class DiagnosticProvider:
     ) -> List[types.Diagnostic]:
         diagnostics: list[types.Diagnostic] = []
 
-        if not treat_as_module:
-            source = apply_argument_parsing(source)
-        blocks = find_draconic_blocks(source, treat_as_module=treat_as_module)
+        source_ctx = build_source_context(source, treat_as_module)
+        blocks = source_ctx.blocks
         if not blocks:
-            plain = _plain_command_diagnostics(source)
+            plain = _plain_command_diagnostics(source_ctx.prepared)
             if plain is not None:
                 diagnostics.extend(plain)
                 return diagnostics
-            diagnostics.extend(await self._analyze_code(source, ctx_data, gvar_resolver))
+            diagnostics.extend(await self._analyze_code(source_ctx.prepared, ctx_data, gvar_resolver))
             return diagnostics
 
         for block in blocks:
@@ -70,7 +72,7 @@ class DiagnosticProvider:
         try:
             body = parser.parse(code)
         except draconic.DraconicSyntaxError as exc:
-            wrapped, added = _wrap_draconic(code)
+            wrapped, added = wrap_draconic(code)
             try:
                 body = parser.parse(wrapped)
                 line_shift = -added
@@ -255,11 +257,12 @@ class DiagnosticProvider:
 
 
 def _syntax_diagnostic(exc: draconic.DraconicSyntaxError) -> types.Diagnostic:
-    rng = _range_from_positions(
+    rng = range_from_positions(
         exc.lineno,
         exc.offset,
         exc.end_lineno,
         exc.end_offset,
+        one_based=True,
     )
     return types.Diagnostic(
         message=exc.msg,
@@ -271,7 +274,13 @@ def _syntax_diagnostic(exc: draconic.DraconicSyntaxError) -> types.Diagnostic:
 
 def _syntax_from_std(exc: SyntaxError) -> types.Diagnostic:
     lineno, offset = exc.lineno, exc.offset
-    rng = _range_from_positions(lineno, offset, getattr(exc, "end_lineno", None), getattr(exc, "end_offset", None))
+    rng = range_from_positions(
+        lineno,
+        offset,
+        getattr(exc, "end_lineno", None),
+        getattr(exc, "end_offset", None),
+        one_based=True,
+    )
     return types.Diagnostic(
         message=exc.msg,
         range=rng,
@@ -281,16 +290,7 @@ def _syntax_from_std(exc: SyntaxError) -> types.Diagnostic:
 
 
 def _names_in_target(target: ast.AST) -> Set[str]:
-    names: set[str] = set()
-    if isinstance(target, ast.Name):
-        names.add(target.id)
-    elif isinstance(target, ast.Tuple):
-        for elt in target.elts:
-            names.update(_names_in_target(elt))
-    elif isinstance(target, ast.List):
-        for elt in target.elts:
-            names.update(_names_in_target(elt))
-    return names
+    return set(collect_target_names([target]))
 
 
 async def _check_gvars(
@@ -440,7 +440,7 @@ def _property_call_diagnostics(
     base_type = _resolve_expr_type(node.func.value, type_map, code)
     if not base_type:
         return []
-    meta = _type_meta(base_type)
+    meta = type_meta(base_type)
     attr = node.func.attr
     if attr in meta.methods or attr not in meta.attrs:
         return []
@@ -487,7 +487,7 @@ def _iterable_attr_diagnostics(
     base_type = _resolve_expr_type(node.value, type_map, code)
     if not base_type:
         return []
-    meta = _type_meta(base_type)
+    meta = type_meta(base_type)
     attr_meta = meta.attrs.get(node.attr)
     if not attr_meta:
         return []
@@ -513,18 +513,18 @@ def _iterable_attr_diagnostics(
 
 
 def _diagnostic_type_map(code: str) -> Dict[str, str]:
-    mapping = _infer_type_map(code)
+    mapping = infer_type_map(code)
     if mapping:
         return mapping
-    wrapped, _ = _wrap_draconic(code)
-    return _infer_type_map(wrapped)
+    wrapped, _ = wrap_draconic(code)
+    return infer_type_map(wrapped)
 
 
 def _resolve_expr_type(expr: ast.AST, type_map: Dict[str, str], code: str) -> str:
     expr_text = _expr_to_str(expr)
     if not expr_text:
         return ""
-    return _resolve_type_name(expr_text, code, type_map)
+    return resolve_type_name(expr_text, code, type_map)
 
 
 def _expr_to_str(expr: ast.AST) -> str:
@@ -587,11 +587,12 @@ def _make_diagnostic(
 ) -> types.Diagnostic:
     severity = SEVERITY.get(level, types.DiagnosticSeverity.Warning)
     if hasattr(node, "lineno"):
-        rng = _range_from_positions(
+        rng = range_from_positions(
             getattr(node, "lineno", 1),
             getattr(node, "col_offset", 0) + 1,
             getattr(node, "end_lineno", None),
             getattr(node, "end_col_offset", None),
+            one_based=True,
         )
     else:
         rng = types.Range(
@@ -614,7 +615,7 @@ def _shift_diagnostics(diags: List[types.Diagnostic], line_offset: int, char_off
         shifted.append(
             types.Diagnostic(
                 message=diag.message,
-                range=_shift_range(diag.range, line_offset, char_offset),
+                range=shift_range(diag.range, line_offset, char_offset),
                 severity=diag.severity,
                 source=diag.source,
                 code=diag.code,
@@ -627,20 +628,6 @@ def _shift_diagnostics(diags: List[types.Diagnostic], line_offset: int, char_off
     return shifted
 
 
-def _shift_range(rng: types.Range, line_offset: int, char_offset: int) -> types.Range:
-    def _shift_pos(pos: types.Position) -> types.Position:
-        return types.Position(
-            line=max(pos.line + line_offset, 0),
-            character=max(pos.character + (char_offset if pos.line == 0 else 0), 0),
-        )
-
-    return types.Range(start=_shift_pos(rng.start), end=_shift_pos(rng.end))
-
-
-def _wrap_draconic(code: str) -> tuple[str, int]:
-    indented = "\n".join(f"    {line}" for line in code.splitlines())
-    wrapped = f"def __alias_main__():\n{indented}\n__alias_main__()"
-    return wrapped, 1
 
 
 def _build_builtin_signatures() -> dict[str, inspect.Signature]:
@@ -791,23 +778,6 @@ def _check_imports(body: Sequence[ast.AST], severity_level: str) -> List[types.D
     return diagnostics
 
 
-def _range_from_positions(
-    lineno: int | None,
-    col_offset: int | None,
-    end_lineno: int | None,
-    end_col_offset: int | None,
-) -> types.Range:
-    start = types.Position(
-        line=max((lineno or 1) - 1, 0),
-        character=max((col_offset or 1) - 1, 0),
-    )
-    end = types.Position(
-        line=max(((end_lineno or lineno or 1) - 1), 0),
-        character=max(((end_col_offset or col_offset or 1) - 1), 0),
-    )
-    return types.Range(start=start, end=end)
-
-
 def _plain_command_diagnostics(source: str) -> list[types.Diagnostic] | None:
     """Handle simple commands (embed/echo) without draconic blocks."""
     simulated = simulate_command(source)
@@ -818,7 +788,7 @@ def _plain_command_diagnostics(source: str) -> list[types.Diagnostic] | None:
             return [
                 types.Diagnostic(
                     message=simulated.validation_error,
-                    range=_range_from_positions(1, 1, 1, 1),
+                    range=range_from_positions(1, 1, 1, 1, one_based=True),
                     severity=SEVERITY["warning"],
                     source="avrae-ls",
                 )

@@ -288,6 +288,15 @@ def test_completion_includes_signature_and_doc():
     assert "cvar" in (get_sugg.documentation or "")
 
 
+def test_svar_completion_includes_workspace_svars():
+    cfg = AvraeLSConfig.default(Path("."))
+    ctx_data = ContextData(vars=VarSources(svars={"server_flag": "on"}))
+    resolver = GVarResolver(cfg)
+    suggestions = gather_suggestions(ctx_data, resolver, {})
+    detail_map = {sugg.name: sugg.detail for sugg in suggestions}
+    assert detail_map.get("server_flag") == "svar"
+
+
 def test_argparse_completions_return_parsed_arguments_methods():
     code = "\n".join(
         [
@@ -314,10 +323,42 @@ def test_argparse_hover_shows_parsed_arguments_type():
 
 
 def test_parameter_annotation_infers_type():
-    code = 'def use_roll(res: "SimpleRollResult"):\n    res.'
-    items = completion_items_for_position(code, line=1, character=len("    res."), suggestions=[])
+    completion_code = 'def use_roll(res: "SimpleRollResult"):\n    res.'
+    items = completion_items_for_position(completion_code, line=1, character=len("    res."), suggestions=[])
     labels = {item.label for item in items}
     assert "dice" in labels
+    cfg = AvraeLSConfig.default(Path("."))
+    ctx_data = ContextData()
+    resolver = GVarResolver(cfg)
+    hover_code = 'def use_roll(res: "SimpleRollResult"):\n    res'
+    hover = hover_for_position(hover_code, line=1, character=len("    res"), sigs={}, ctx_data=ctx_data, resolver=resolver)
+    assert hover is not None
+    assert "SimpleRollResult" in hover.contents.value
+
+
+def test_function_parameter_in_completion_before_full_name():
+    code = "\n".join(
+        [
+            "def build(resistance: int, other):",
+            "    res",
+        ]
+    )
+    items = completion_items_for_position(code, line=1, character=len("    res"), suggestions=[])
+    item = next(item for item in items if item.label == "resistance")
+    assert "int" in (item.detail or "")
+
+
+def test_function_local_in_completion_before_full_name():
+    code = "\n".join(
+        [
+            "def build():",
+            "    local_value = 1",
+            "    loc",
+        ]
+    )
+    items = completion_items_for_position(code, line=2, character=len("    loc"), suggestions=[])
+    item = next(item for item in items if item.label == "local_value")
+    assert "local" in (item.detail or "")
 
 
 def test_plain_identifier_named_like_type_does_not_infer():

@@ -17,12 +17,12 @@ from .context import ContextBuilder
 from .diagnostics import DiagnosticProvider
 from .runtime import MockExecutor
 from .alias_preview import render_alias_command, simulate_command
-from .parser import find_draconic_blocks, is_alias_module_path
+from .parser import is_alias_module_path
+from .source_context import build_source_context, block_for_line
 from .signature_help import load_signatures, signature_help_for_code
 from .completions import gather_suggestions, completion_items_for_position, hover_for_position
 from .code_actions import code_actions_for_document
 from .symbols import build_symbol_table, document_symbols, find_definition_range, find_references, range_for_word
-from .argument_parsing import apply_argument_parsing
 
 # Prefer package metadata so the server version matches the installed wheel.
 try:
@@ -217,20 +217,17 @@ def on_workspace_symbol(server: AvraeLanguageServer, params: types.WorkspaceSymb
 def on_signature_help(server: AvraeLanguageServer, params: types.SignatureHelpParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
     is_module = _is_alias_module_document(doc)
-    source = apply_argument_parsing(doc.source) if not is_module else doc.source
-    blocks = find_draconic_blocks(source, treat_as_module=is_module)
+    source_ctx = build_source_context(doc.source, is_module)
     pos = params.position
-    if not blocks:
-        return signature_help_for_code(source, pos.line, pos.character, server._signatures)
+    if not source_ctx.blocks:
+        return signature_help_for_code(source_ctx.prepared, pos.line, pos.character, server._signatures)
 
-    for block in blocks:
-        start = block.line_offset
-        end = block.line_offset + block.line_count
-        if start <= pos.line <= end:
-            rel_line = pos.line - start
-            help_ = signature_help_for_code(block.code, rel_line, pos.character, server._signatures)
-            if help_:
-                return help_
+    block = block_for_line(source_ctx.blocks, pos.line)
+    if block:
+        rel_line = pos.line - block.line_offset
+        help_ = signature_help_for_code(block.code, rel_line, pos.character, server._signatures)
+        if help_:
+            return help_
     return None
 
 
@@ -243,18 +240,15 @@ def on_completion(server: AvraeLanguageServer, params: types.CompletionParams):
     ctx_data = server.state.context_builder.build()
     suggestions = gather_suggestions(ctx_data, server.state.context_builder.gvar_resolver, server._signatures)
     is_module = _is_alias_module_document(doc)
-    source = apply_argument_parsing(doc.source) if not is_module else doc.source
-    blocks = find_draconic_blocks(source, treat_as_module=is_module)
+    source_ctx = build_source_context(doc.source, is_module)
     pos = params.position
-    if not blocks:
-        return completion_items_for_position(source, pos.line, pos.character, suggestions)
+    if not source_ctx.blocks:
+        return completion_items_for_position(source_ctx.prepared, pos.line, pos.character, suggestions)
 
-    for block in blocks:
-        start = block.line_offset
-        end = block.line_offset + block.line_count
-        if start <= pos.line <= end:
-            rel_line = pos.line - start
-            return completion_items_for_position(block.code, rel_line, pos.character, suggestions)
+    block = block_for_line(source_ctx.blocks, pos.line)
+    if block:
+        rel_line = pos.line - block.line_offset
+        return completion_items_for_position(block.code, rel_line, pos.character, suggestions)
     return []
 
 
@@ -264,17 +258,28 @@ def on_hover(server: AvraeLanguageServer, params: types.HoverParams):
     ctx_data = server.state.context_builder.build()
     pos = params.position
     is_module = _is_alias_module_document(doc)
-    source = apply_argument_parsing(doc.source) if not is_module else doc.source
-    blocks = find_draconic_blocks(source, treat_as_module=is_module)
-    if not blocks:
-        return hover_for_position(source, pos.line, pos.character, server._signatures, ctx_data, server.state.context_builder.gvar_resolver)
+    source_ctx = build_source_context(doc.source, is_module)
+    if not source_ctx.blocks:
+        return hover_for_position(
+            source_ctx.prepared,
+            pos.line,
+            pos.character,
+            server._signatures,
+            ctx_data,
+            server.state.context_builder.gvar_resolver,
+        )
 
-    for block in blocks:
-        start = block.line_offset
-        end = block.line_offset + block.line_count
-        if start <= pos.line <= end:
-            rel_line = pos.line - start
-            return hover_for_position(block.code, rel_line, pos.character, server._signatures, ctx_data, server.state.context_builder.gvar_resolver)
+    block = block_for_line(source_ctx.blocks, pos.line)
+    if block:
+        rel_line = pos.line - block.line_offset
+        return hover_for_position(
+            block.code,
+            rel_line,
+            pos.character,
+            server._signatures,
+            ctx_data,
+            server.state.context_builder.gvar_resolver,
+        )
     return None
 
 

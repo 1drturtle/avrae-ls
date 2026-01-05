@@ -87,3 +87,9 @@ def primary_block_or_source(source: str, *, treat_as_module: bool = False) -> tu
         return source, 0, 0
     block = blocks[0]
     return block.code, block.line_offset, block.char_offset
+
+
+def wrap_draconic(code: str) -> tuple[str, int]:
+    indented = "\n".join(f"    {line}" for line in code.splitlines())
+    wrapped = f"def __alias_main__():\n{indented}\n__alias_main__()"
+    return wrapped, 1

@@ -10,7 +10,8 @@ from typing import Iterable, List, Sequence
 from lsprotocol import types
 
 from .codes import MISSING_GVAR_CODE, UNDEFINED_NAME_CODE, UNSUPPORTED_IMPORT_CODE
-from .parser import DraconicBlock, find_draconic_blocks
+from .parser import DraconicBlock
+from .source_context import build_source_context
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +48,8 @@ def code_actions_for_document(
 ) -> List[types.CodeAction]:
     """Collect code actions for a document without requiring a running server."""
     actions: list[types.CodeAction] = []
-    blocks = find_draconic_blocks(source, treat_as_module=treat_as_module)
+    source_ctx = build_source_context(source, treat_as_module, apply_args=False)
+    blocks = source_ctx.blocks
     snippets = _load_snippets(workspace_root)
     only_kinds = list(params.context.only or [])
 

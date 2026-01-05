@@ -8,8 +8,9 @@ from typing import Dict, Iterable, List, Optional
 import draconic
 from lsprotocol import types
 
-from .argument_parsing import apply_argument_parsing
-from .parser import find_draconic_blocks
+from .source_context import build_source_context
+from .parser import wrap_draconic
+from .lsp_utils import range_from_positions, shift_range
 
 log = logging.getLogger(__name__)
 
@@ -37,12 +38,11 @@ class SymbolTable:
 
 def build_symbol_table(source: str, *, treat_as_module: bool = False) -> SymbolTable:
     entries: list[SymbolEntry] = []
-    parsed_source = apply_argument_parsing(source) if not treat_as_module else source
-    blocks = find_draconic_blocks(parsed_source, treat_as_module=treat_as_module)
-    if not blocks:
-        entries.extend(_symbols_from_code(parsed_source, 0, 0))
+    source_ctx = build_source_context(source, treat_as_module)
+    if not source_ctx.blocks:
+        entries.extend(_symbols_from_code(source_ctx.prepared, 0, 0))
     else:
-        for block in blocks:
+        for block in source_ctx.blocks:
             entries.extend(_symbols_from_code(block.code, block.line_offset, block.char_offset))
     return SymbolTable(entries)
 
@@ -75,7 +75,6 @@ def find_references(
     *,
     treat_as_module: bool = False,
 ) -> List[types.Range]:
-    parsed_source = apply_argument_parsing(source) if not treat_as_module else source
     ranges: list[types.Range] = []
     entry = table.lookup(name)
     include_stores = include_declaration and entry is None
@@ -83,11 +82,11 @@ def find_references(
         if entry:
             ranges.append(entry.selection_range)
 
-    blocks = find_draconic_blocks(parsed_source, treat_as_module=treat_as_module)
-    if not blocks:
-        ranges.extend(_references_from_code(parsed_source, name, 0, 0, include_stores))
+    source_ctx = build_source_context(source, treat_as_module)
+    if not source_ctx.blocks:
+        ranges.extend(_references_from_code(source_ctx.prepared, name, 0, 0, include_stores))
     else:
-        for block in blocks:
+        for block in source_ctx.blocks:
             ranges.extend(
                 _references_from_code(block.code, name, block.line_offset, block.char_offset, include_stores)
             )
@@ -163,13 +162,14 @@ def _entry_from_node(node: ast.AST, line_offset: int = 0, char_offset: int = 0) 
     else:
         return None
 
-    rng = _range_from_positions(
+    rng = range_from_positions(
         getattr(node, "lineno", 1),
         getattr(node, "col_offset", 0),
         getattr(node, "end_lineno", None),
         getattr(node, "end_col_offset", None),
+        ensure_nonempty=True,
     )
-    rng = _shift_range(rng, line_offset, char_offset)
+    rng = shift_range(rng, line_offset, char_offset)
     return SymbolEntry(name=name, kind=kind, range=rng, selection_range=rng)
 
 
@@ -184,11 +184,12 @@ class _ReferenceCollector(ast.NodeVisitor):
         if node.id == self._target:
             if isinstance(node.ctx, ast.Store) and not self._include_stores:
                 return
-            rng = _range_from_positions(
+            rng = range_from_positions(
                 getattr(node, "lineno", 1),
                 getattr(node, "col_offset", 0),
                 getattr(node, "end_lineno", None),
                 getattr(node, "end_col_offset", None),
+                ensure_nonempty=True,
             )
             self.ranges.append(rng)
         self.generic_visit(node)
@@ -210,7 +211,7 @@ def _references_from_code(
         collector.visit(node)
 
     local_offset = line_offset + offset_adjust
-    return [_shift_range(rng, local_offset, char_offset) for rng in collector.ranges]
+    return [shift_range(rng, local_offset, char_offset) for rng in collector.ranges]
 
 
 def _parse_draconic(code: str) -> tuple[list[ast.AST], int]:
@@ -218,7 +219,7 @@ def _parse_draconic(code: str) -> tuple[list[ast.AST], int]:
     try:
         return parser.parse(code), 0
     except draconic.DraconicSyntaxError:
-        wrapped, added = _wrap_draconic(code)
+        wrapped, added = wrap_draconic(code)
         try:
             return parser.parse(wrapped), -added
         except draconic.DraconicSyntaxError:
@@ -226,45 +227,6 @@ def _parse_draconic(code: str) -> tuple[list[ast.AST], int]:
     except Exception as exc:  # pragma: no cover - defensive
         log.debug("Symbol extraction failed: %s", exc)
         return [], 0
-
-
-def _range_from_positions(
-    lineno: int | None,
-    col_offset: int | None,
-    end_lineno: int | None,
-    end_col_offset: int | None,
-) -> types.Range:
-    start_line = max((lineno or 1) - 1, 0)
-    start_char = max(col_offset or 0, 0)
-    end_line = max(((end_lineno or lineno or 1) - 1), 0)
-    raw_end_char = end_col_offset if end_col_offset is not None else col_offset
-    end_char = max(raw_end_char or start_char, start_char)
-    if end_char <= start_char:
-        end_char = start_char + 1
-    return types.Range(
-        start=types.Position(line=start_line, character=start_char),
-        end=types.Position(line=end_line, character=end_char),
-    )
-
-
-def _shift_range(rng: types.Range, line_offset: int, char_offset: int = 0) -> types.Range:
-    start_char = rng.start.character + (char_offset if rng.start.line == 0 else 0)
-    end_char = rng.end.character + (char_offset if rng.end.line == 0 else 0)
-    if line_offset == 0:
-        return types.Range(
-            start=types.Position(line=rng.start.line, character=start_char),
-            end=types.Position(line=rng.end.line, character=end_char),
-        )
-    return types.Range(
-        start=types.Position(line=max(rng.start.line + line_offset, 0), character=max(start_char, 0)),
-        end=types.Position(line=max(rng.end.line + line_offset, 0), character=max(end_char, 0)),
-    )
-
-
-def _wrap_draconic(code: str) -> tuple[str, int]:
-    indented = "\n".join(f"    {line}" for line in code.splitlines())
-    wrapped = f"def __alias_main__():\n{indented}\n__alias_main__()"
-    return wrapped, 1
 
 
 def _dedupe_ranges(ranges: Iterable[types.Range]) -> List[types.Range]:
