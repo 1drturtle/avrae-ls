@@ -2,7 +2,7 @@
   "name": "avrae-ls-client",
   "displayName": "Avrae Draconic Alias Language Server",
   "description": "VS Code client for avrae-ls (draconic alias diagnostics and mock execution).",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -20,6 +20,7 @@
   ],
   "activationEvents": [
     "onLanguage:avrae",
+    "onLanguage:avrae-module",
     "onCommand:avrae-ls.runAlias",
     "onCommand:avrae-ls.reloadConfig",
     "onCommand:avrae-ls.refreshGvars"
@@ -38,6 +39,17 @@
           ".drac"
         ],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "avrae-module",
+        "aliases": [
+          "Avrae Alias Module",
+          "Draconic Module"
+        ],
+        "extensions": [
+          ".alias-module"
+        ],
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
@@ -48,6 +60,11 @@
         "embeddedLanguages": {
           "meta.embedded.draconic": "python"
         }
+      },
+      {
+        "language": "avrae-module",
+        "scopeName": "source.avrae-module",
+        "path": "./syntaxes/avrae-module.tmLanguage.json"
       }
     ],
     "commands": [

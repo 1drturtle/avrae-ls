@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List
 
 
@@ -17,9 +18,29 @@ class DraconicBlock:
 DRACONIC_RE = re.compile(r"<drac2>([\s\S]*?)</drac2>", re.IGNORECASE)
 INLINE_DRACONIC_RE = re.compile(r"\{\{([\s\S]*?)\}\}", re.DOTALL)
 INLINE_ROLL_RE = re.compile(r"(?<!\{)\{(?!\{)([\s\S]*?)(?<!\})\}(?!\})", re.DOTALL)
+ALIAS_MODULE_SUFFIX = ".alias-module"
 
 
-def find_draconic_blocks(source: str) -> List[DraconicBlock]:
+def is_alias_module_path(path: str | Path | None) -> bool:
+    if path is None:
+        return False
+    return str(path).endswith(ALIAS_MODULE_SUFFIX)
+
+
+def _full_source_block(source: str) -> DraconicBlock:
+    line_count = source.count("\n") + 1 if source else 1
+    return DraconicBlock(
+        code=source,
+        line_offset=0,
+        char_offset=0,
+        line_count=line_count,
+        inline=False,
+    )
+
+
+def find_draconic_blocks(source: str, *, treat_as_module: bool = False) -> List[DraconicBlock]:
+    if treat_as_module:
+        return [_full_source_block(source)]
     matches: list[tuple[int, DraconicBlock]] = []
 
     def _block_from_match(match: re.Match[str], inline: bool = False) -> tuple[int, int, DraconicBlock]:
@@ -60,8 +81,8 @@ def find_draconic_blocks(source: str) -> List[DraconicBlock]:
     return blocks
 
 
-def primary_block_or_source(source: str) -> tuple[str, int, int]:
-    blocks = find_draconic_blocks(source)
+def primary_block_or_source(source: str, *, treat_as_module: bool = False) -> tuple[str, int, int]:
+    blocks = find_draconic_blocks(source, treat_as_module=treat_as_module)
     if not blocks:
         return source, 0, 0
     block = blocks[0]

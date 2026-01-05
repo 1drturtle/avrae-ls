@@ -17,7 +17,12 @@ function activate(context) {
   };
 
   const clientOptions = {
-    documentSelector: [{ scheme: "file", language: "avrae" }, { scheme: "untitled", language: "avrae" }],
+    documentSelector: [
+      { scheme: "file", language: "avrae" },
+      { scheme: "untitled", language: "avrae" },
+      { scheme: "file", language: "avrae-module" },
+      { scheme: "untitled", language: "avrae-module" },
+    ],
     outputChannelName: "Avrae LS",
   };
 
@@ -35,6 +40,10 @@ function activate(context) {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
         vscode.window.showWarningMessage("Open an Avrae alias file to run.");
+        return;
+      }
+      if (editor.document.languageId !== "avrae") {
+        vscode.window.showWarningMessage("Run Alias is only available for Avrae alias files.");
         return;
       }
       const selection = editor.selection;
@@ -106,6 +115,10 @@ function activate(context) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       vscode.window.showWarningMessage("Open an Avrae alias file to preview.");
+      return;
+    }
+    if (editor.document.languageId !== "avrae") {
+      vscode.window.showWarningMessage("Alias preview is only available for Avrae alias files.");
       return;
     }
     await runAndRenderDocument(editor.document);

@@ -35,10 +35,10 @@ class SymbolTable:
         return self._index.get(name)
 
 
-def build_symbol_table(source: str) -> SymbolTable:
+def build_symbol_table(source: str, *, treat_as_module: bool = False) -> SymbolTable:
     entries: list[SymbolEntry] = []
-    parsed_source = apply_argument_parsing(source)
-    blocks = find_draconic_blocks(parsed_source)
+    parsed_source = apply_argument_parsing(source) if not treat_as_module else source
+    blocks = find_draconic_blocks(parsed_source, treat_as_module=treat_as_module)
     if not blocks:
         entries.extend(_symbols_from_code(parsed_source, 0, 0))
     else:
@@ -47,8 +47,8 @@ def build_symbol_table(source: str) -> SymbolTable:
     return SymbolTable(entries)
 
 
-def document_symbols(source: str) -> List[types.DocumentSymbol]:
-    table = build_symbol_table(source)
+def document_symbols(source: str, *, treat_as_module: bool = False) -> List[types.DocumentSymbol]:
+    table = build_symbol_table(source, treat_as_module=treat_as_module)
     return [
         types.DocumentSymbol(
             name=entry.name,
@@ -68,9 +68,14 @@ def find_definition_range(table: SymbolTable, name: str) -> types.Range | None:
 
 
 def find_references(
-    table: SymbolTable, source: str, name: str, include_declaration: bool = True
+    table: SymbolTable,
+    source: str,
+    name: str,
+    include_declaration: bool = True,
+    *,
+    treat_as_module: bool = False,
 ) -> List[types.Range]:
-    parsed_source = apply_argument_parsing(source)
+    parsed_source = apply_argument_parsing(source) if not treat_as_module else source
     ranges: list[types.Range] = []
     entry = table.lookup(name)
     include_stores = include_declaration and entry is None
@@ -78,7 +83,7 @@ def find_references(
         if entry:
             ranges.append(entry.selection_range)
 
-    blocks = find_draconic_blocks(parsed_source)
+    blocks = find_draconic_blocks(parsed_source, treat_as_module=treat_as_module)
     if not blocks:
         ranges.extend(_references_from_code(parsed_source, name, 0, 0, include_stores))
     else:

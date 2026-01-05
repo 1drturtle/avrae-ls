@@ -37,11 +37,14 @@ class DiagnosticProvider:
         source: str,
         ctx_data: ContextData,
         gvar_resolver: GVarResolver,
+        *,
+        treat_as_module: bool = False,
     ) -> List[types.Diagnostic]:
         diagnostics: list[types.Diagnostic] = []
 
-        source = apply_argument_parsing(source)
-        blocks = find_draconic_blocks(source)
+        if not treat_as_module:
+            source = apply_argument_parsing(source)
+        blocks = find_draconic_blocks(source, treat_as_module=treat_as_module)
         if not blocks:
             plain = _plain_command_diagnostics(source)
             if plain is not None:

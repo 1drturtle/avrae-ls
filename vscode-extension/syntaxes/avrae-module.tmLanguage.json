@@ -1,0 +1,12 @@
+{
+  "name": "Avrae Alias Module",
+  "scopeName": "source.avrae-module",
+  "patterns": [
+    {
+      "include": "source.python"
+    }
+  ],
+  "fileTypes": [
+    "alias-module"
+  ]
+}

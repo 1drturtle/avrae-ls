@@ -17,7 +17,7 @@ from .context import ContextBuilder
 from .diagnostics import DiagnosticProvider
 from .runtime import MockExecutor
 from .alias_preview import render_alias_command, simulate_command
-from .parser import find_draconic_blocks
+from .parser import find_draconic_blocks, is_alias_module_path
 from .signature_help import load_signatures, signature_help_for_code
 from .completions import gather_suggestions, completion_items_for_position, hover_for_position
 from .code_actions import code_actions_for_document
@@ -134,14 +134,14 @@ async def did_change_config(server: AvraeLanguageServer, params: types.DidChange
 @ls.feature(types.TEXT_DOCUMENT_DOCUMENT_SYMBOL)
 def on_document_symbol(server: AvraeLanguageServer, params: types.DocumentSymbolParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
-    symbols = document_symbols(doc.source)
+    symbols = document_symbols(doc.source, treat_as_module=_is_alias_module_document(doc))
     return symbols
 
 
 @ls.feature(types.TEXT_DOCUMENT_DEFINITION)
 def on_definition(server: AvraeLanguageServer, params: types.DefinitionParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
-    table = build_symbol_table(doc.source)
+    table = build_symbol_table(doc.source, treat_as_module=_is_alias_module_document(doc))
     word = doc.word_at_position(params.position)
     rng = find_definition_range(table, word)
     if rng is None:
@@ -152,19 +152,26 @@ def on_definition(server: AvraeLanguageServer, params: types.DefinitionParams):
 @ls.feature(types.TEXT_DOCUMENT_REFERENCES)
 def on_references(server: AvraeLanguageServer, params: types.ReferenceParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
-    table = build_symbol_table(doc.source)
+    is_module = _is_alias_module_document(doc)
+    table = build_symbol_table(doc.source, treat_as_module=is_module)
     word = doc.word_at_position(params.position)
     if not word or not table.lookup(word):
         return []
 
-    ranges = find_references(table, doc.source, word, include_declaration=params.context.include_declaration)
+    ranges = find_references(
+        table,
+        doc.source,
+        word,
+        include_declaration=params.context.include_declaration,
+        treat_as_module=is_module,
+    )
     return [types.Location(uri=params.text_document.uri, range=rng) for rng in ranges]
 
 
 @ls.feature(types.TEXT_DOCUMENT_PREPARE_RENAME)
 def on_prepare_rename(server: AvraeLanguageServer, params: types.PrepareRenameParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
-    table = build_symbol_table(doc.source)
+    table = build_symbol_table(doc.source, treat_as_module=_is_alias_module_document(doc))
     word = doc.word_at_position(params.position)
     if not word or not table.lookup(word):
         return None
@@ -174,12 +181,13 @@ def on_prepare_rename(server: AvraeLanguageServer, params: types.PrepareRenamePa
 @ls.feature(types.TEXT_DOCUMENT_RENAME)
 def on_rename(server: AvraeLanguageServer, params: types.RenameParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
-    table = build_symbol_table(doc.source)
+    is_module = _is_alias_module_document(doc)
+    table = build_symbol_table(doc.source, treat_as_module=is_module)
     word = doc.word_at_position(params.position)
     if not word or not table.lookup(word) or not params.new_name:
         return None
 
-    ranges = find_references(table, doc.source, word, include_declaration=True)
+    ranges = find_references(table, doc.source, word, include_declaration=True, treat_as_module=is_module)
     if not ranges:
         return None
     edits = [types.TextEdit(range=rng, new_text=params.new_name) for rng in ranges]
@@ -191,7 +199,7 @@ def on_workspace_symbol(server: AvraeLanguageServer, params: types.WorkspaceSymb
     symbols: list[types.SymbolInformation] = []
     query = (params.query or "").lower()
     for uri, doc in server.workspace.text_documents.items():
-        table = build_symbol_table(doc.source)
+        table = build_symbol_table(doc.source, treat_as_module=_is_alias_module_document(doc))
         for entry in table.entries:
             if query and query not in entry.name.lower():
                 continue
@@ -208,8 +216,9 @@ def on_workspace_symbol(server: AvraeLanguageServer, params: types.WorkspaceSymb
 @ls.feature(types.TEXT_DOCUMENT_SIGNATURE_HELP)
 def on_signature_help(server: AvraeLanguageServer, params: types.SignatureHelpParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
-    source = apply_argument_parsing(doc.source)
-    blocks = find_draconic_blocks(source)
+    is_module = _is_alias_module_document(doc)
+    source = apply_argument_parsing(doc.source) if not is_module else doc.source
+    blocks = find_draconic_blocks(source, treat_as_module=is_module)
     pos = params.position
     if not blocks:
         return signature_help_for_code(source, pos.line, pos.character, server._signatures)
@@ -233,8 +242,9 @@ def on_completion(server: AvraeLanguageServer, params: types.CompletionParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
     ctx_data = server.state.context_builder.build()
     suggestions = gather_suggestions(ctx_data, server.state.context_builder.gvar_resolver, server._signatures)
-    source = apply_argument_parsing(doc.source)
-    blocks = find_draconic_blocks(source)
+    is_module = _is_alias_module_document(doc)
+    source = apply_argument_parsing(doc.source) if not is_module else doc.source
+    blocks = find_draconic_blocks(source, treat_as_module=is_module)
     pos = params.position
     if not blocks:
         return completion_items_for_position(source, pos.line, pos.character, suggestions)
@@ -253,8 +263,9 @@ def on_hover(server: AvraeLanguageServer, params: types.HoverParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
     ctx_data = server.state.context_builder.build()
     pos = params.position
-    source = apply_argument_parsing(doc.source)
-    blocks = find_draconic_blocks(source)
+    is_module = _is_alias_module_document(doc)
+    source = apply_argument_parsing(doc.source) if not is_module else doc.source
+    blocks = find_draconic_blocks(source, treat_as_module=is_module)
     if not blocks:
         return hover_for_position(source, pos.line, pos.character, server._signatures, ctx_data, server.state.context_builder.gvar_resolver)
 
@@ -270,7 +281,12 @@ def on_hover(server: AvraeLanguageServer, params: types.HoverParams):
 @ls.feature(types.TEXT_DOCUMENT_CODE_ACTION)
 def on_code_action(server: AvraeLanguageServer, params: types.CodeActionParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
-    return code_actions_for_document(doc.source, params, server.workspace_root)
+    return code_actions_for_document(
+        doc.source,
+        params,
+        server.workspace_root,
+        treat_as_module=_is_alias_module_document(doc),
+    )
 
 
 @ls.command(RUN_ALIAS_COMMAND)
@@ -372,7 +388,10 @@ async def _publish_diagnostics(
     doc = server.workspace.get_text_document(uri)
     ctx_data = server.state.context_builder.build(profile)
     diags = await server.state.diagnostics.analyze(
-        doc.source, ctx_data, server.state.context_builder.gvar_resolver
+        doc.source,
+        ctx_data,
+        server.state.context_builder.gvar_resolver,
+        treat_as_module=_is_alias_module_document(doc),
     )
     if extra:
         diags.extend(extra)
@@ -441,6 +460,20 @@ def _find_using_range(source: str, module: str | None) -> types.Range | None:
                         end = types.Position(line=node.end_lineno - 1, character=node.end_col_offset)
                         return types.Range(start=start, end=end)
     return None
+
+
+def _is_alias_module_document(doc: Any) -> bool:
+    language_id = getattr(doc, "language_id", None)
+    if language_id == "avrae-module":
+        return True
+    uri = getattr(doc, "uri", None)
+    if not isinstance(uri, str):
+        return False
+    try:
+        path = Path(uris.to_fs_path(uri))
+    except Exception:
+        return uri.endswith(".alias-module")
+    return is_alias_module_path(path)
 
 
 def create_server() -> AvraeLanguageServer:

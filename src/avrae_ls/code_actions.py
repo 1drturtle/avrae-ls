@@ -42,10 +42,12 @@ def code_actions_for_document(
     source: str,
     params: types.CodeActionParams,
     workspace_root: Path,
+    *,
+    treat_as_module: bool = False,
 ) -> List[types.CodeAction]:
     """Collect code actions for a document without requiring a running server."""
     actions: list[types.CodeAction] = []
-    blocks = find_draconic_blocks(source)
+    blocks = find_draconic_blocks(source, treat_as_module=treat_as_module)
     snippets = _load_snippets(workspace_root)
     only_kinds = list(params.context.only or [])
 
