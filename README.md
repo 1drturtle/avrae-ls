@@ -10,6 +10,7 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
 
 - Install from VSIX: download `avrae-ls-client.vsix` from the GitHub releases page, then in VS Code run “Extensions: Install from VSIX” and select the file.
 - Open your alias workspace; commands like `Avrae: Show Alias Preview` and `Avrae: Run Alias` will be available.
+- Files ending with `.alias-module` are treated as full-file draconic modules under the `avrae-module` language id (no `<drac2>` tags; mock run/preview commands stay tied to `.alias` files).
 
 ## Developing locally
 
