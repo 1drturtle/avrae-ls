@@ -42,6 +42,7 @@ class AliasTestResult:
     embed: dict[str, Any] | None = None
     error: str | None = None
     details: str | None = None
+    error_line: int | None = None
 
 
 def discover_test_files(
@@ -159,6 +160,7 @@ async def run_alias_test(case: AliasTestCase, builder: ContextBuilder, executor:
             actual=None,
             stdout=rendered.stdout,
             error=str(rendered.error),
+            error_line=rendered.error_line,
         )
 
     preview = simulate_command(rendered.command)

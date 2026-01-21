@@ -82,6 +82,21 @@ async def test_mock_executor_resolves_gvars(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_silent_gvar_fetch_raises_when_none_used(tmp_path):
+    cfg = AvraeLSConfig.default(tmp_path)
+    cfg.silent_gvar_fetch = True
+    resolver = GVarResolver(cfg)
+    ctx = _ctx()
+    executor = MockExecutor()
+
+    result = await executor.run("load_json(get_gvar('missing'))", ctx, resolver)
+
+    assert resolver.get_local("missing") is None
+    assert result.error is not None
+    assert "Expecting value" in str(result.error)
+
+
+@pytest.mark.asyncio
 async def test_alias_block_executes(tmp_path):
     executor = MockExecutor()
     ctx = _ctx()

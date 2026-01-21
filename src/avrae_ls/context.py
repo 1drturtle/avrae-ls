@@ -145,6 +145,19 @@ class GVarResolver:
         self._config = config
         self._cache: Dict[str, Any] = {}
 
+    def _silent_failure(self, key: str) -> bool:
+        if not self._config.silent_gvar_fetch:
+            return False
+        self._cache[str(key)] = None
+        return True
+
+    def _silent_failure_many(self, keys: Iterable[str]) -> bool:
+        if not self._config.silent_gvar_fetch:
+            return False
+        for key in keys:
+            self._cache[str(key)] = None
+        return True
+
     def reset(self, gvars: Dict[str, Any] | None = None) -> None:
         self._cache = {}
         if gvars:
@@ -176,10 +189,18 @@ class GVarResolver:
         if not missing:
             return results
         if not self._config.enable_gvar_fetch:
-            log.warning("GVAR fetch disabled; skipping %s", missing)
+            if not self._config.silent_gvar_fetch:
+                log.warning("GVAR fetch disabled; skipping %s", missing)
+            if self._silent_failure_many(missing):
+                for key in missing:
+                    results[key] = True
             return results
         if not self._config.service.token:
-            log.debug("GVAR fetch skipped for %s: no token configured", missing)
+            if not self._config.silent_gvar_fetch:
+                log.debug("GVAR fetch skipped for %s: no token configured", missing)
+            if self._silent_failure_many(missing):
+                for key in missing:
+                    results[key] = True
             return results
 
         sem = asyncio.Semaphore(self._CONCURRENCY)
@@ -191,8 +212,9 @@ class GVarResolver:
             try:
                 ensured = await self._fetch_remote(key, client=client, sem=sem)
             except Exception as exc:  # pragma: no cover - defensive
-                log.error("GVAR fetch failed for %s: %s", key, exc)
-                ensured = False
+                if not self._config.silent_gvar_fetch:
+                    log.error("GVAR fetch failed for %s: %s", key, exc)
+                ensured = self._silent_failure(key)
             results[key] = ensured
 
         async with httpx.AsyncClient(timeout=5) as client:
@@ -205,11 +227,13 @@ class GVarResolver:
             log.debug("GVAR ensure_blocking cache hit for %s", key)
             return True
         if not self._config.enable_gvar_fetch:
-            log.warning("GVAR fetch disabled; skipping %s", key)
-            return False
+            if not self._config.silent_gvar_fetch:
+                log.warning("GVAR fetch disabled; skipping %s", key)
+            return self._silent_failure(key)
         if not self._config.service.token:
-            log.debug("GVAR fetch skipped for %s: no token configured", key)
-            return False
+            if not self._config.silent_gvar_fetch:
+                log.debug("GVAR fetch skipped for %s: no token configured", key)
+            return self._silent_failure(key)
 
         base_url = self._config.service.base_url.rstrip("/")
         url = f"{base_url}/customizations/gvars/{key}"
@@ -219,17 +243,19 @@ class GVarResolver:
             with httpx.Client(timeout=5) as client:
                 resp = client.get(url, headers=headers)
         except Exception as exc:
-            log.error("GVAR blocking fetch failed for %s: %s", key, exc)
-            return False
+            if not self._config.silent_gvar_fetch:
+                log.error("GVAR blocking fetch failed for %s: %s", key, exc)
+            return self._silent_failure(key)
 
         if resp.status_code != 200:
-            log.warning(
-                "GVAR blocking fetch returned %s for %s (body: %s)",
-                resp.status_code,
-                key,
-                (resp.text or "").strip(),
-            )
-            return False
+            if not self._config.silent_gvar_fetch:
+                log.warning(
+                    "GVAR blocking fetch returned %s for %s (body: %s)",
+                    resp.status_code,
+                    key,
+                    (resp.text or "").strip(),
+                )
+            return self._silent_failure(key)
 
         value: Any = None
         try:
@@ -241,8 +267,9 @@ class GVarResolver:
             value = payload["value"]
 
         if value is None:
-            log.error("GVAR %s payload missing value", key)
-            return False
+            if not self._config.silent_gvar_fetch:
+                log.error("GVAR %s payload missing value", key)
+            return self._silent_failure(key)
         self._cache[key] = value
         return True
 
@@ -262,9 +289,9 @@ class GVarResolver:
         if key in self._cache:
             return True
         if not self._config.enable_gvar_fetch:
-            return False
+            return self._silent_failure(key)
         if not self._config.service.token:
-            return False
+            return self._silent_failure(key)
 
         base_url = self._config.service.base_url.rstrip("/")
         url = f"{base_url}/customizations/gvars/{key}"
@@ -286,21 +313,23 @@ class GVarResolver:
             log.debug("GVAR fetching %s from %s", key, url)
             resp = await _do_request(session)
         except Exception as exc:
-            log.error("GVAR fetch failed for %s: %s", key, exc)
+            if not self._config.silent_gvar_fetch:
+                log.error("GVAR fetch failed for %s: %s", key, exc)
             if close_client:
                 await session.aclose()
-            return False
+            return self._silent_failure(key)
         if close_client:
             await session.aclose()
 
         if resp.status_code != 200:
-            log.warning(
-                "GVAR fetch returned %s for %s (body: %s)",
-                resp.status_code,
-                key,
-                (resp.text or "").strip(),
-            )
-            return False
+            if not self._config.silent_gvar_fetch:
+                log.warning(
+                    "GVAR fetch returned %s for %s (body: %s)",
+                    resp.status_code,
+                    key,
+                    (resp.text or "").strip(),
+                )
+            return self._silent_failure(key)
 
         value: Any = None
         try:
@@ -314,8 +343,9 @@ class GVarResolver:
         log.debug("GVAR fetch parsed value for %s (type=%s)", key, type(value).__name__)
 
         if value is None:
-            log.error("GVAR %s payload missing value", key)
-            return False
+            if not self._config.silent_gvar_fetch:
+                log.error("GVAR %s payload missing value", key)
+            return self._silent_failure(key)
         self._cache[key] = value
         return True
 

@@ -42,6 +42,11 @@ def main(argv: list[str] | None = None) -> None:
         const=".",
         help="Run alias tests in PATH (defaults to current directory)",
     )
+    parser.add_argument(
+        "--silent-gvar-fetch",
+        action="store_true",
+        help="Silently ignore gvar fetch failures and treat them as None",
+    )
     parser.add_argument("--token", help="Avrae API token (overrides config)")
     parser.add_argument("--base-url", help="Avrae API base URL (overrides config)")
     parser.add_argument("--version", action="store_true", help="Print version and exit")
@@ -58,12 +63,26 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("--run-tests cannot be combined with --tcp")
         if args.analyze:
             parser.error("--run-tests cannot be combined with --analyze")
-        sys.exit(_run_alias_tests(Path(args.run_tests), token_override=args.token, base_url_override=args.base_url))
+        sys.exit(
+            _run_alias_tests(
+                Path(args.run_tests),
+                token_override=args.token,
+                base_url_override=args.base_url,
+                silent_gvar_fetch=args.silent_gvar_fetch,
+            )
+        )
 
     if args.analyze:
         if args.tcp:
             parser.error("--analyze cannot be combined with --tcp")
-        sys.exit(_run_analysis(Path(args.analyze), token_override=args.token, base_url_override=args.base_url))
+        sys.exit(
+            _run_analysis(
+                Path(args.analyze),
+                token_override=args.token,
+                base_url_override=args.base_url,
+                silent_gvar_fetch=args.silent_gvar_fetch,
+            )
+        )
 
     server = create_server()
     if args.tcp:
@@ -82,7 +101,13 @@ def _configure_logging(level: str) -> None:
     )
 
 
-def _run_analysis(path: Path, *, token_override: str | None = None, base_url_override: str | None = None) -> int:
+def _run_analysis(
+    path: Path,
+    *,
+    token_override: str | None = None,
+    base_url_override: str | None = None,
+    silent_gvar_fetch: bool = False,
+) -> int:
     if not path.exists():
         print(f"File not found: {path}", file=sys.stderr)
         return 2
@@ -96,6 +121,8 @@ def _run_analysis(path: Path, *, token_override: str | None = None, base_url_ove
         config.service.token = token_override
     if base_url_override:
         config.service.base_url = base_url_override
+    if silent_gvar_fetch:
+        config.silent_gvar_fetch = True
     for warning in warnings:
         log.warning(warning)
 
@@ -111,7 +138,11 @@ def _run_analysis(path: Path, *, token_override: str | None = None, base_url_ove
 
 
 def _run_alias_tests(
-    target: Path, *, token_override: str | None = None, base_url_override: str | None = None
+    target: Path,
+    *,
+    token_override: str | None = None,
+    base_url_override: str | None = None,
+    silent_gvar_fetch: bool = False,
 ) -> int:
     if not target.exists():
         print(f"Test path not found: {target}", file=sys.stderr)
@@ -126,6 +157,8 @@ def _run_alias_tests(
         config.service.token = token_override
     if base_url_override:
         config.service.base_url = base_url_override
+    if silent_gvar_fetch:
+        config.silent_gvar_fetch = True
     for warning in warnings:
         log.warning(warning)
 
@@ -169,7 +202,11 @@ def _print_test_results(results: Iterable[AliasTestResult], workspace_root: Path
             passed += 1
             continue
         if res.error:
-            print(f"  Error: {res.error}")
+            if res.error_line is not None:
+                alias_name = res.case.alias_path.name
+                print(f"  Error (line {res.error_line} {alias_name}): {res.error}")
+            else:
+                print(f"  Error: {res.error}")
         if res.details:
             print(f"  {res.details}")
         expected_val, actual_val = _summarize_mismatch(res.case.expected, res.actual)

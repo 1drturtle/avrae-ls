@@ -82,6 +82,7 @@ class ContextProfile:
 class AvraeLSConfig:
     workspace_root: Path
     enable_gvar_fetch: bool = False
+    silent_gvar_fetch: bool = False
     service: AvraeServiceConfig = field(default_factory=AvraeServiceConfig)
     var_files: Tuple[Path, ...] = field(default_factory=tuple)
     default_profile: str = "default"

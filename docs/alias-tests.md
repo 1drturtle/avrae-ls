@@ -241,5 +241,8 @@ Yes. JSON is valid YAML, so JSON objects and lists work in the expected and meta
 **Why is a gvar missing or `using(...)` failing?**
 Make sure `.avraels.json` enables gvar fetch and sets a token, or provide the gvar in your var files or test metadata under `vars.gvars`.
 
+**How do I ignore gvar fetch failures in CLI runs?**
+Use `avrae-ls --run-tests --silent-gvar-fetch` to treat remote gvar fetch failures as `None` without warnings.
+
 **Do tests change my real Avrae data?**
 No. The mock runtime does not write back to Avrae. Any variable changes are isolated to a single test run.

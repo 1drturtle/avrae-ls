@@ -31,6 +31,18 @@ async def test_refresh_gvars_command_uses_profile_seed():
     assert "abc123" not in result["gvars"]
 
 
+@pytest.mark.asyncio
+async def test_silent_gvar_fetch_seeds_none_when_disabled():
+    cfg = AvraeLSConfig.default(Path("."))
+    cfg.silent_gvar_fetch = True
+    resolver = GVarResolver(cfg)
+
+    fetched = await resolver.ensure("missing")
+
+    assert fetched is True
+    assert resolver.get_local("missing") is None
+
+
 def test_context_builder_resets_cached_gvars_per_build(tmp_path):
     cfg = AvraeLSConfig.default(tmp_path)
     builder = ContextBuilder(cfg)

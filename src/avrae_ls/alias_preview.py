@@ -17,6 +17,7 @@ class RenderedAlias:
     stdout: str
     error: Optional[BaseException]
     last_value: Any | None = None
+    error_line: int | None = None
 
 
 @dataclass
@@ -58,7 +59,7 @@ class SimulatedCommand:
     embed: EmbedPreview | None = None
 
 
-def _strip_alias_header(text: str) -> str:
+def _strip_alias_header_with_offset(text: str) -> tuple[str, int]:
     lines = text.splitlines()
     if lines and lines[0].lstrip().startswith("!alias"):
         first = lines[0].lstrip()
@@ -66,9 +67,32 @@ def _strip_alias_header(text: str) -> str:
         remainder = parts[2] if len(parts) > 2 else ""
         body = "\n".join(lines[1:])
         if remainder:
-            return remainder + ("\n" + body if body else "")
-        return body
-    return text
+            return remainder + ("\n" + body if body else ""), 0
+        return body, 1
+    return text, 0
+
+
+def _strip_alias_header(text: str) -> str:
+    body, _ = _strip_alias_header_with_offset(text)
+    return body
+
+
+def _line_index_for_offset(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset)
+
+
+def _error_line_for_match(
+    body: str, match: re.Match[str], error: BaseException, line_offset: int
+) -> int | None:
+    base_line = _line_index_for_offset(body, match.start(1))
+    lineno = getattr(error, "lineno", None)
+    if isinstance(lineno, int) and lineno > 0 and getattr(error, "text", None) is not None:
+        line_index = base_line + (lineno - 1)
+    else:
+        code = match.group(1)
+        leading_newlines = len(code) - len(code.lstrip("\n"))
+        line_index = base_line + leading_newlines
+    return line_index + line_offset + 1
 
 
 async def render_alias_command(
@@ -79,12 +103,13 @@ async def render_alias_command(
     args: list[str] | None = None,
 ) -> RenderedAlias:
     """Replace <drac2> blocks with their evaluated values and return final command."""
-    body = _strip_alias_header(text)
+    body, line_offset = _strip_alias_header_with_offset(text)
     body = apply_argument_parsing(body, args)
     stdout_parts: list[str] = []
     parts: list[str] = []
     last_value = None
     error: BaseException | None = None
+    error_line: int | None = None
 
     pos = 0
     matches: list[tuple[str, re.Match[str]]] = []
@@ -109,6 +134,7 @@ async def render_alias_command(
                 stdout_parts.append(result.stdout)
             if result.error:
                 error = result.error
+                error_line = _error_line_for_match(body, match, result.error, line_offset)
                 break
             last_value = result.value
             if result.value is not None:
@@ -124,7 +150,13 @@ async def render_alias_command(
         parts.append(body[pos:])
 
     final_command = "".join(parts)
-    return RenderedAlias(command=final_command, stdout="".join(stdout_parts), error=error, last_value=last_value)
+    return RenderedAlias(
+        command=final_command,
+        stdout="".join(stdout_parts),
+        error=error,
+        last_value=last_value,
+        error_line=error_line,
+    )
 
 
 def validate_embed_payload(payload: str) -> Tuple[bool, str | None]:
