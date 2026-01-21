@@ -178,6 +178,45 @@ name: "no-output-check"
 - Each test runs independently, so one test does not affect another.
 - The expected section is compared against the alias result or embed preview, not against stdout. Stdout is shown in the test report to help debug.
 
+## GitHub Actions
+
+This repo ships a composite action that installs `avrae-ls` and runs alias tests.
+
+1. Create a minimal config file for CI (for example `.github/avrae/ci.avraels.json`):
+
+```json
+{
+  "enableGvarFetch": true,
+  "avraeService": {
+    "token": "${AVRAE_TOKEN}"
+  }
+}
+```
+
+2. Add a workflow that uses the action:
+
+```yaml
+name: Alias Tests
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  alias-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: 1drturtle/avrae-ls@main
+        with:
+          test-path: .
+          config-path: .github/avrae/ci.avraels.json
+          avrae-token: ${{ secrets.AVRAE_TOKEN }}
+```
+
+- `config-path` defaults to `.avraels.json`. When you point it at another file, the action copies it to `.avraels.json` in the workspace before running tests.
+- `avrae-token` is optional unless your tests rely on remote gvars or `verify_signature`. Prefer `${AVRAE_TOKEN}` in config files instead of hardcoding tokens.
+
 ## FAQ
 
 **How do I run just one test file?**

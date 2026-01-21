@@ -57,6 +57,10 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
   `name` is a label for reporting, `vars` are merged into cvars/uvars/svars/gvars, and `character` keys are deep-merged into the mock character.
 - Run them with `avrae-ls --run-tests [path]` (defaults to the current directory); non-zero exit codes indicate failures.
 
+## Config variable substitution
+
+- `.avraels.json` values support environment variable substitution with `$NAME` or `${NAME}`. `workspaceRoot` and `workspaceFolder` are injected automatically. Missing variables are replaced with an empty string and logged as warnings.
+
 ## Runtime differences (mock vs. live Avrae)
 
 - Mock execution never writes back to Avrae: cvar/uvar/gvar mutations only live for the current run and reset before the next.

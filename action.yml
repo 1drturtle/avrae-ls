@@ -1,0 +1,55 @@
+name: "Avrae Alias Tests"
+description: "Run avrae-ls alias tests in CI."
+inputs:
+  test-path:
+    description: "Path to search for alias test files."
+    required: false
+    default: "."
+  config-path:
+    description: "Path to a .avraels.json config file to use."
+    required: false
+    default: ".avraels.json"
+  avrae-token:
+    description: "Avrae API token (also exported as AVRAE_TOKEN for config substitution)."
+    required: false
+  base-url:
+    description: "Override Avrae API base URL."
+    required: false
+  python-version:
+    description: "Python version to use."
+    required: false
+    default: "3.11"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - uses: astral-sh/setup-uv@v3
+    - name: Install avrae-ls
+      shell: bash
+      run: uv tool install avrae-ls
+    - name: Prepare config
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.config-path }}" ] && [ "${{ inputs.config-path }}" != ".avraels.json" ]; then
+          if [ ! -f "${{ inputs.config-path }}" ]; then
+            echo "Config path not found: ${{ inputs.config-path }}" >&2
+            exit 1
+          fi
+          cp "${{ inputs.config-path }}" ".avraels.json"
+        fi
+    - name: Run alias tests
+      shell: bash
+      env:
+        AVRAE_TOKEN: ${{ inputs.avrae-token }}
+      run: |
+        set -euo pipefail
+        args=()
+        if [ -n "${{ inputs.avrae-token }}" ]; then
+          args+=(--token "${{ inputs.avrae-token }}")
+        fi
+        if [ -n "${{ inputs.base-url }}" ]; then
+          args+=(--base-url "${{ inputs.base-url }}")
+        fi
+        avrae-ls --run-tests "${{ inputs.test-path }}" "${args[@]}"
