@@ -1,6 +1,7 @@
 import pytest
 
 from avrae_ls.alias_tests import AliasTestError, parse_alias_tests, run_alias_tests
+from avrae_ls.__main__ import _run_alias_tests
 from avrae_ls.config import AvraeLSConfig
 from avrae_ls.context import ContextBuilder
 from avrae_ls.runtime import MockExecutor
@@ -78,6 +79,60 @@ async def test_alias_tests_include_error_line(tmp_path):
     assert not result.passed
     assert result.error is not None
     assert result.error_line == 3
+
+
+@pytest.mark.asyncio
+async def test_alias_tests_include_error_line_with_inline_drac2_tag(tmp_path):
+    alias_path = tmp_path / "embed-error.alias"
+    alias_path.write_text(
+        '!alias embed-error embed <drac2>\n# testing 123\na = 3\n# testing 456\nload_json("")\n</drac2>\n'
+    )
+    test_path = tmp_path / "test-embed-error.alias-test"
+    test_path.write_text("!embed-error\n---\n\n")
+
+    config = AvraeLSConfig.default(tmp_path)
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    case = parse_alias_tests(test_path)[0]
+    result = (await run_alias_tests([case], builder, executor))[0]
+
+    assert not result.passed
+    assert result.error is not None
+    assert result.error_line == 5
+
+
+def test_run_tests_output_uses_rendered_command(tmp_path, capsys):
+    (tmp_path / ".avraels.json").write_text('{"enableGvarFetch": false}')
+    alias_path = tmp_path / "speak.alias"
+    alias_path.write_text("!alias speak say hello {{1 + 2}}")
+    test_path = tmp_path / "test-speak.alias-test"
+    test_path.write_text("!speak\n---\nsay hello 4\n")
+
+    exit_code = _run_alias_tests(tmp_path)
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Expected: say hello 4" in captured.out
+    assert "Actual: say hello 3" in captured.out
+
+
+def test_run_tests_output_skips_diff_on_execution_error(tmp_path, capsys):
+    (tmp_path / ".avraels.json").write_text('{"enableGvarFetch": false}')
+    alias_path = tmp_path / "boom.alias"
+    alias_path.write_text("!alias boom echo\n<drac2>\nload_json(\"\")\n</drac2>\n")
+    test_path = tmp_path / "test-boom.alias-test"
+    test_path.write_text("!boom\n---\nshould not compare\n")
+
+    exit_code = _run_alias_tests(tmp_path)
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Execution Error" in captured.out
+    assert "- Execution Error" not in captured.out
+    assert "Expected:" not in captured.out
+    assert "Actual:" not in captured.out
+    assert "Diff:" not in captured.out
 
 
 @pytest.mark.asyncio

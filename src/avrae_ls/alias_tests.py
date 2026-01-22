@@ -43,6 +43,7 @@ class AliasTestResult:
     error: str | None = None
     details: str | None = None
     error_line: int | None = None
+    error_col: int | None = None
 
 
 def discover_test_files(
@@ -161,6 +162,7 @@ async def run_alias_test(case: AliasTestCase, builder: ContextBuilder, executor:
             stdout=rendered.stdout,
             error=str(rendered.error),
             error_line=rendered.error_line,
+            error_col=rendered.error_col,
         )
 
     preview = simulate_command(rendered.command)
@@ -173,7 +175,15 @@ async def run_alias_test(case: AliasTestCase, builder: ContextBuilder, executor:
             error=preview.validation_error,
         )
 
-    actual = preview.preview if preview.preview is not None else rendered.last_value
+    if preview.preview is not None:
+        actual = preview.preview
+    else:
+        if rendered.command.strip() == "" and rendered.last_value is None:
+            actual = None
+        elif rendered.last_value is not None and rendered.command.strip() == str(rendered.last_value):
+            actual = rendered.last_value
+        else:
+            actual = rendered.command
     embed_dict = preview.embed.to_dict() if preview.embed else None
 
     if embed_dict is not None and isinstance(case.expected, dict):

@@ -18,6 +18,7 @@ class RenderedAlias:
     error: Optional[BaseException]
     last_value: Any | None = None
     error_line: int | None = None
+    error_col: int | None = None
 
 
 @dataclass
@@ -81,18 +82,43 @@ def _line_index_for_offset(text: str, offset: int) -> int:
     return text.count("\n", 0, offset)
 
 
-def _error_line_for_match(
+def _error_position_for_match(
     body: str, match: re.Match[str], error: BaseException, line_offset: int
-) -> int | None:
+) -> tuple[int | None, int | None]:
     base_line = _line_index_for_offset(body, match.start(1))
-    lineno = getattr(error, "lineno", None)
-    if isinstance(lineno, int) and lineno > 0 and getattr(error, "text", None) is not None:
-        line_index = base_line + (lineno - 1)
+    base_line_start = body.rfind("\n", 0, match.start(1))
+    base_col = match.start(1) - (base_line_start + 1 if base_line_start != -1 else 0)
+    line_in_code: int | None = None
+    col_in_code: int | None = None
+    node = getattr(error, "node", None)
+    if node is not None:
+        node_line = getattr(node, "lineno", None)
+        if isinstance(node_line, int) and node_line > 0:
+            line_in_code = node_line
+        node_col = getattr(node, "col_offset", None)
+        if isinstance(node_col, int) and node_col >= 0:
+            col_in_code = node_col
+    if line_in_code is None:
+        lineno = getattr(error, "lineno", None)
+        if isinstance(lineno, int) and lineno > 0:
+            line_in_code = lineno
+        offset = getattr(error, "offset", None)
+        if isinstance(offset, int) and offset > 0:
+            col_in_code = offset - 1
+    if line_in_code is not None:
+        line_index = base_line + (line_in_code - 1)
     else:
         code = match.group(1)
         leading_newlines = len(code) - len(code.lstrip("\n"))
         line_index = base_line + leading_newlines
-    return line_index + line_offset + 1
+        col_in_code = 0 if col_in_code is None else col_in_code
+    if col_in_code is None:
+        col_in_code = 0
+    if line_in_code is None or line_in_code == 1:
+        col_index = base_col + col_in_code
+    else:
+        col_index = col_in_code
+    return line_index + line_offset + 1, col_index + 1
 
 
 async def render_alias_command(
@@ -110,6 +136,7 @@ async def render_alias_command(
     last_value = None
     error: BaseException | None = None
     error_line: int | None = None
+    error_col: int | None = None
 
     pos = 0
     matches: list[tuple[str, re.Match[str]]] = []
@@ -134,7 +161,7 @@ async def render_alias_command(
                 stdout_parts.append(result.stdout)
             if result.error:
                 error = result.error
-                error_line = _error_line_for_match(body, match, result.error, line_offset)
+                error_line, error_col = _error_position_for_match(body, match, result.error, line_offset)
                 break
             last_value = result.value
             if result.value is not None:
@@ -156,6 +183,7 @@ async def render_alias_command(
         error=error,
         last_value=last_value,
         error_line=error_line,
+        error_col=error_col,
     )
 
 

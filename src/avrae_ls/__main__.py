@@ -202,11 +202,17 @@ def _print_test_results(results: Iterable[AliasTestResult], workspace_root: Path
             passed += 1
             continue
         if res.error:
-            if res.error_line is not None:
-                alias_name = res.case.alias_path.name
-                print(f"  Error (line {res.error_line} {alias_name}): {res.error}")
+            if res.error_line is not None and res.error_col is not None:
+                label = f"  Execution Error (line {res.error_line} col {res.error_col})"
+            elif res.error_line is not None:
+                label = f"  Execution Error (line {res.error_line})"
             else:
-                print(f"  Error: {res.error}")
+                label = "  Execution Error"
+            print(_colorize_error_line(label))
+            print(f"    {res.error}")
+            if res.stdout:
+                print(f"  Stdout: {res.stdout.strip()}")
+            continue
         if res.details:
             print(f"  {res.details}")
         expected_val, actual_val = _summarize_mismatch(res.case.expected, res.actual)
@@ -260,6 +266,12 @@ def _colorize_diff_line(line: str) -> str:
     if line.startswith("@@") or line.startswith("---") or line.startswith("+++"):
         return f"\x1b[36m{line}\x1b[0m"
     return line
+
+
+def _colorize_error_line(line: str) -> str:
+    if not sys.stdout.isatty():
+        return line
+    return f"\x1b[31m{line}\x1b[0m"
 
 
 def _print_labeled_value(label: str, value: str) -> None:
