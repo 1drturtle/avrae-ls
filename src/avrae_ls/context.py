@@ -14,6 +14,7 @@ from .config import AvraeLSConfig, ContextProfile, VarSources
 from .cvars import derive_character_cvars
 
 log = logging.getLogger(__name__)
+_SKIP_GVAR = object()
 
 
 @dataclass
@@ -63,7 +64,7 @@ class ContextBuilder:
             data = _read_json_file(path)
             if data is None:
                 continue
-            merged = merged.merge(VarSources.from_data(data))
+            merged = merged.merge(_var_sources_from_file(path, data))
         return merged
 
     def _merge_character_cvars(self, character: Dict[str, Any], vars: VarSources) -> VarSources:
@@ -366,3 +367,49 @@ def _read_json_file(path: Path) -> Dict[str, Any] | None:
     except json.JSONDecodeError as exc:
         log.warning("Failed to parse var file %s: %s", path, exc)
         return None
+
+
+def _var_sources_from_file(path: Path, data: Dict[str, Any]) -> VarSources:
+    parsed = VarSources.from_data(data)
+    return VarSources(
+        cvars=parsed.cvars,
+        uvars=parsed.uvars,
+        svars=parsed.svars,
+        gvars=_resolve_gvar_file_refs(path, parsed.gvars),
+    )
+
+
+def _resolve_gvar_file_refs(var_file: Path, gvars: Dict[str, Any]) -> Dict[str, Any]:
+    resolved: dict[str, Any] = {}
+    for key, value in gvars.items():
+        parsed = _parse_gvar_value(var_file, key, value)
+        if parsed is _SKIP_GVAR:
+            continue
+        resolved[str(key)] = parsed
+    return resolved
+
+
+def _parse_gvar_value(var_file: Path, key: Any, value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+
+    file_path = value.get("filePath")
+    if file_path is None:
+        file_path = value.get("path")
+    if file_path is None:
+        return value
+    if not isinstance(file_path, str) or not file_path.strip():
+        log.warning("Invalid gvar file path for '%s' in %s; expected a non-empty string.", key, var_file)
+        return _SKIP_GVAR
+
+    gvar_path = Path(file_path)
+    if not gvar_path.is_absolute():
+        gvar_path = var_file.parent / gvar_path
+    try:
+        return gvar_path.read_text()
+    except FileNotFoundError:
+        log.warning("Gvar content file not found for '%s': %s", key, gvar_path)
+        return _SKIP_GVAR
+    except OSError as exc:
+        log.warning("Failed to read gvar content file for '%s' (%s): %s", key, gvar_path, exc)
+        return _SKIP_GVAR

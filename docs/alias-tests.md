@@ -174,7 +174,7 @@ name: "no-output-check"
 
 - Expected output cannot include a line that starts with `!` because that marks the next test. If you need to check a `!` line, use a single-line string like `"line1\n!line2"` or a regex like `re:^!`.
 - If you want a number treated as text, wrap it in quotes (YAML reads bare numbers as numbers).
-- The mock context comes from `.avraels.json` and any var files you configure there. Metadata `vars` and `character` values are merged on top of those defaults for the test only.
+- The mock context comes from `.avraels.json` and any var files you configure there (including gvar `{ filePath: ... }` entries). Metadata `vars` and `character` values are merged on top of those defaults for the test only.
 - Each test runs independently, so one test does not affect another.
 - The expected section is compared against the alias result or embed preview, not against stdout. Stdout is shown in the test report to help debug.
 
@@ -239,7 +239,7 @@ It looks in the same folder as the test file for the alias name in your command 
 Yes. JSON is valid YAML, so JSON objects and lists work in the expected and metadata sections.
 
 **Why is a gvar missing or `using(...)` failing?**
-Make sure `.avraels.json` enables gvar fetch and sets a token, or provide the gvar in your var files or test metadata under `vars.gvars`.
+Make sure `.avraels.json` enables gvar fetch and sets a token, or provide the gvar in your var files (inline or with `{ filePath: ... }`) or test metadata under `vars.gvars`.
 
 **How do I ignore gvar fetch failures in CLI runs?**
 Use `avrae-ls --run-tests --silent-gvar-fetch` to treat remote gvar fetch failures as `None` without warnings.

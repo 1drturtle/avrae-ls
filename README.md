@@ -65,12 +65,12 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
 
 - Mock execution never writes back to Avrae: cvar/uvar/gvar mutations only live for the current run and reset before the next.
 - Network is limited to gvar fetches (when `enableGvarFetch` is true) and `verify_signature`; other Avrae/Discord calls are replaced with mocked context data from `.avraels.json`.
-- `get_gvar`/`using` values are pulled from local var files first; remote fetches go to `https://api.avrae.io/customizations/gvars/<id>` (or your `avraeService.baseUrl`) using `avraeService.token` and are cached for the session.
+- `get_gvar`/`using` values are pulled from local var files first; remote fetches go to `https://api.avrae.io/customizations/gvars/<id>` (or your `avraeService.baseUrl`) using `avraeService.token` and are cached for the session. In var files, a gvar can be a direct value or a `{ "filePath": "relative/or/absolute/path" }` object (also supports `"path"`) that loads file contents as the gvar value.
 - `signature()` returns a mock string (`mock-signature:<int>`). `verify_signature()` POSTs to `/bot/signature/verify`, reuses the last successful response per signature, and includes `avraeService.token` if present.
 
 ## Troubleshooting gvar fetch / verify_signature
 
-- `get_gvar` returns `None` or `using(...)` raises `ModuleNotFoundError`: ensure the workspace `.avraels.json` sets `enableGvarFetch: true`, includes a valid `avraeService.token`, or seed the gvar in a var file referenced by `varFiles`.
+- `get_gvar` returns `None` or `using(...)` raises `ModuleNotFoundError`: ensure the workspace `.avraels.json` sets `enableGvarFetch: true`, includes a valid `avraeService.token`, or seed the gvar in a var file referenced by `varFiles` (including `filePath` gvar entries).
 - HTTP 401/403/404 from fetch/verify calls: check the token (401/403) and the gvar/signature id (404). Override `avraeService.baseUrl` if you mirror the API.
 - Slow or flaky calls: disable remote fetches by flipping `enableGvarFetch` off to rely purely on local vars.
 

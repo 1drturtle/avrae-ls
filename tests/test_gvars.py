@@ -1,5 +1,7 @@
-import pytest
+import json
 from pathlib import Path
+
+import pytest
 
 from avrae_ls.config import AvraeLSConfig
 from avrae_ls.context import ContextBuilder, GVarResolver
@@ -188,3 +190,52 @@ async def test_refresh_fetches_multiple_when_enabled(monkeypatch):
     assert snapshot["g2"] == "value:g2"
     assert len(captured["urls"]) == 2
     assert captured["headers"] == [{"Authorization": "token"}, {"Authorization": "token"}]
+
+
+def test_context_builder_loads_gvar_from_file_path(tmp_path: Path):
+    var_dir = tmp_path / "vars"
+    var_dir.mkdir()
+
+    gvar_file = var_dir / "mod.gvar"
+    gvar_file.write_text("answer = 42\n")
+    gvar_file_alt = var_dir / "mod-alt.gvar"
+    gvar_file_alt.write_text("answer = 84\n")
+
+    var_file = var_dir / "gvars.json"
+    var_file.write_text(
+        json.dumps({"gvars": {"mod123": {"filePath": "mod.gvar"}, "mod456": {"path": "mod-alt.gvar"}}})
+    )
+
+    cfg = AvraeLSConfig.default(tmp_path)
+    cfg.var_files = (var_file,)
+    builder = ContextBuilder(cfg)
+
+    ctx = builder.build()
+
+    assert ctx.vars.gvars["mod123"] == "answer = 42\n"
+    assert ctx.vars.gvars["mod456"] == "answer = 84\n"
+    assert builder.gvar_resolver.get_local("mod123") == "answer = 42\n"
+
+
+def test_context_builder_skips_missing_gvar_file_path(tmp_path: Path, caplog: pytest.LogCaptureFixture):
+    var_file = tmp_path / "gvars.json"
+    var_file.write_text(
+        json.dumps(
+            {
+                "gvars": {
+                    "mod123": {"filePath": "missing.gvar"},
+                    "inline": "return 1",
+                }
+            }
+        )
+    )
+
+    cfg = AvraeLSConfig.default(tmp_path)
+    cfg.var_files = (var_file,)
+
+    with caplog.at_level("WARNING"):
+        ctx = ContextBuilder(cfg).build()
+
+    assert "mod123" not in ctx.vars.gvars
+    assert ctx.vars.gvars["inline"] == "return 1"
+    assert "Gvar content file not found for 'mod123'" in caplog.text
