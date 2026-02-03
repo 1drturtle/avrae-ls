@@ -1,5 +1,7 @@
 # Avrae Draconic Alias Language Server
 
+[![Tests](https://github.com/1drturtle/avrae-ls/actions/workflows/ci.yml/badge.svg)](https://github.com/1drturtle/avrae-ls/actions/workflows/ci.yml)
+
 Language Server Protocol (LSP) implementation targeting Avrae-style draconic aliases. It provides syntax/semantic diagnostics, a mocked execution command, and a thin configuration layer driven by a workspace `.avraels.json` file. Credit to Avrae team for all code yoinked!
 
 ## Install (released package)

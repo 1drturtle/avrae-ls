@@ -27,7 +27,7 @@ wheels = [
 
 [[package]]
 name = "avrae-ls"
-version = "0.7.1"
+version = "0.8.1"
 source = { editable = "." }
 dependencies = [
     { name = "d20" },
