@@ -4,7 +4,7 @@ import ast
 import re
 from typing import Dict, Iterable, Optional
 
-from .type_system import resolve_type_key, type_meta
+from avrae_ls.analysis.type_system import resolve_type_key, type_meta
 
 
 def annotation_label(node: ast.AST | None) -> str:

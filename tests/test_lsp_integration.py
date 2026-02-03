@@ -3,7 +3,7 @@ from pathlib import Path
 from lsprotocol import types
 from pygls.workspace import Workspace
 
-from avrae_ls.server import AvraeLanguageServer, on_completion, on_hover
+from avrae_ls.lsp.server import AvraeLanguageServer, on_completion, on_hover
 
 
 def _server_with_doc(source: str, uri: str = "file:///integration.alias") -> AvraeLanguageServer:

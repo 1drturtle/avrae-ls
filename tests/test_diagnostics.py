@@ -1,10 +1,10 @@
 import pytest
 
 from avrae_ls.config import AvraeLSConfig, DiagnosticSettings, VarSources
-from avrae_ls.context import ContextData, GVarResolver
-from avrae_ls.diagnostics import DiagnosticProvider
-from avrae_ls.alias_preview import render_alias_command
-from avrae_ls.runtime import MockExecutor
+from avrae_ls.runtime.context import ContextData, GVarResolver
+from avrae_ls.analysis.diagnostics import DiagnosticProvider
+from avrae_ls.runtime.alias_preview import render_alias_command
+from avrae_ls.runtime.runtime import MockExecutor
 
 
 def _provider():

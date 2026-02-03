@@ -12,7 +12,7 @@ import yaml
 
 from lsprotocol import types
 
-from .alias_tests import (
+from avrae_ls.testing.alias_tests import (
     AliasTestError,
     AliasTestResult,
     diff_mismatched_parts,
@@ -20,11 +20,11 @@ from .alias_tests import (
     parse_alias_tests,
     run_alias_tests,
 )
-from .config import CONFIG_FILENAME, load_config
-from .context import ContextBuilder
-from .diagnostics import DiagnosticProvider
-from .runtime import MockExecutor
-from .server import create_server, __version__
+from avrae_ls.config import CONFIG_FILENAME, load_config
+from avrae_ls.runtime.context import ContextBuilder
+from avrae_ls.analysis.diagnostics import DiagnosticProvider
+from avrae_ls.runtime.runtime import MockExecutor
+from avrae_ls.lsp.server import create_server, __version__
 
 
 def main(argv: list[str] | None = None) -> None:

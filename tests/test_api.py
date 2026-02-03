@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from avrae_ls.api import AliasContextAPI, CharacterAPI, CombatAPI
+from avrae_ls.runtime.api import AliasContextAPI, CharacterAPI, CombatAPI
 from avrae_ls.config import AvraeLSConfig
 
 

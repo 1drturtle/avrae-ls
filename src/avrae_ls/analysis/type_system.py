@@ -9,8 +9,8 @@ from html import unescape
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Dict, Iterable, List
 
-from .argparser import ParsedArguments
-from .api import (
+from avrae_ls.runtime.argparser import ParsedArguments
+from avrae_ls.runtime.api import (
     AliasAction,
     AliasAttack,
     AliasAttackList,

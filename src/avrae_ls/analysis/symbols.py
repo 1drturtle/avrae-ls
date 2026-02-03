@@ -8,9 +8,9 @@ from typing import Dict, Iterable, List, Optional
 import draconic
 from lsprotocol import types
 
-from .source_context import build_source_context
-from .parser import wrap_draconic
-from .lsp_utils import range_from_positions, shift_range
+from avrae_ls.analysis.source_context import build_source_context
+from avrae_ls.analysis.parser import wrap_draconic
+from avrae_ls.lsp.lsp_utils import range_from_positions, shift_range
 
 log = logging.getLogger(__name__)
 

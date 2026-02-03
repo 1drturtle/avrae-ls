@@ -8,17 +8,17 @@ from typing import Any, Dict, Iterable, List, Sequence, Set
 import draconic
 from lsprotocol import types
 
-from .alias_preview import simulate_command
-from .codes import MISSING_GVAR_CODE, UNDEFINED_NAME_CODE, UNSUPPORTED_IMPORT_CODE
-from .source_context import build_source_context
-from .type_inference import infer_type_map, resolve_type_name
-from .type_system import type_meta
-from .config import DiagnosticSettings
-from .context import ContextData, GVarResolver
-from .parser import wrap_draconic
-from .lsp_utils import range_from_positions, shift_range
-from .ast_utils import collect_target_names
-from .runtime import MockExecutor, _default_builtins
+from avrae_ls.runtime.alias_preview import simulate_command
+from avrae_ls.lsp.codes import MISSING_GVAR_CODE, UNDEFINED_NAME_CODE, UNSUPPORTED_IMPORT_CODE
+from avrae_ls.analysis.source_context import build_source_context
+from avrae_ls.analysis.type_inference import infer_type_map, resolve_type_name
+from avrae_ls.analysis.type_system import type_meta
+from avrae_ls.config import DiagnosticSettings
+from avrae_ls.runtime.context import ContextData, GVarResolver
+from avrae_ls.analysis.parser import wrap_draconic
+from avrae_ls.lsp.lsp_utils import range_from_positions, shift_range
+from avrae_ls.analysis.ast_utils import collect_target_names
+from avrae_ls.runtime.runtime import MockExecutor, _default_builtins
 
 log = logging.getLogger(__name__)
 

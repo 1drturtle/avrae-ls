@@ -5,10 +5,10 @@ import shlex
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional, Tuple
 
-from .parser import DRACONIC_RE, INLINE_DRACONIC_RE, INLINE_ROLL_RE
-from .runtime import ExecutionResult, MockExecutor, _roll_dice
-from .context import ContextData, GVarResolver
-from .argument_parsing import apply_argument_parsing
+from avrae_ls.analysis.parser import DRACONIC_RE, INLINE_DRACONIC_RE, INLINE_ROLL_RE
+from avrae_ls.runtime.runtime import ExecutionResult, MockExecutor, _roll_dice
+from avrae_ls.runtime.context import ContextData, GVarResolver
+from avrae_ls.runtime.argument_parsing import apply_argument_parsing
 
 
 @dataclass

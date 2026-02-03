@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from avrae_ls.completions import (
+from avrae_ls.lsp.completions import (
     completion_items_for_position,
     gather_suggestions,
     hover_for_position,
 )
 from avrae_ls.config import AvraeLSConfig, VarSources
-from avrae_ls.context import ContextBuilder, ContextData, GVarResolver
-from avrae_ls.signature_help import load_signatures
+from avrae_ls.runtime.context import ContextBuilder, ContextData, GVarResolver
+from avrae_ls.lsp.signature_help import load_signatures
 
 
 def test_hover_out_of_bounds_cursor_does_not_crash():

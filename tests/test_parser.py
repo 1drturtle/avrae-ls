@@ -1,4 +1,4 @@
-from avrae_ls.parser import find_draconic_blocks
+from avrae_ls.analysis.parser import find_draconic_blocks
 
 
 def test_alias_module_treats_entire_file_as_draconic_block():

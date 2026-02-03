@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from avrae_ls.cvars import derive_character_cvars
+from avrae_ls.runtime.cvars import derive_character_cvars
 from avrae_ls.config import AvraeLSConfig, VarSources
-from avrae_ls.context import ContextBuilder
+from avrae_ls.runtime.context import ContextBuilder
 
 
 def test_var_sources_scope_order():

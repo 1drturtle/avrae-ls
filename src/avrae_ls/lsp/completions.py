@@ -7,13 +7,13 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from lsprotocol import types
 
-from .context import ContextData, GVarResolver
-from .runtime import _default_builtins
-from .api import AliasContextAPI, CharacterAPI, SimpleCombat
-from .signature_help import FunctionSig
-from .type_inference import annotation_label, infer_type_map, resolve_type_name
-from .type_system import display_type_label, is_safe_call, type_meta
-from .ast_utils import collect_target_names
+from avrae_ls.runtime.context import ContextData, GVarResolver
+from avrae_ls.runtime.runtime import _default_builtins
+from avrae_ls.runtime.api import AliasContextAPI, CharacterAPI, SimpleCombat
+from avrae_ls.lsp.signature_help import FunctionSig
+from avrae_ls.analysis.type_inference import annotation_label, infer_type_map, resolve_type_name
+from avrae_ls.analysis.type_system import display_type_label, is_safe_call, type_meta
+from avrae_ls.analysis.ast_utils import collect_target_names
 
 
 IDENT_RE = re.compile(r"[A-Za-z_]\w*$")

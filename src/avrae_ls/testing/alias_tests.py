@@ -8,10 +8,10 @@ from typing import Any, Iterable, Sequence
 
 import yaml
 
-from .alias_preview import render_alias_command, simulate_command
-from .context import ContextBuilder
-from .runtime import MockExecutor
-from .config import VarSources
+from avrae_ls.runtime.alias_preview import render_alias_command, simulate_command
+from avrae_ls.runtime.context import ContextBuilder
+from avrae_ls.runtime.runtime import MockExecutor
+from avrae_ls.config import VarSources
 
 MISSING_VALUE = "<missing>"
 

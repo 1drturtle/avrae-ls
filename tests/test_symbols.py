@@ -3,14 +3,14 @@ from pathlib import Path
 from lsprotocol import types
 from pygls.workspace import Workspace
 
-from avrae_ls.symbols import (
+from avrae_ls.analysis.symbols import (
     build_symbol_table,
     document_symbols,
     find_definition_range,
     find_references,
     range_for_word,
 )
-from avrae_ls.server import AvraeLanguageServer, on_rename
+from avrae_ls.lsp.server import AvraeLanguageServer, on_rename
 
 
 def test_build_symbol_table_and_document_symbols():

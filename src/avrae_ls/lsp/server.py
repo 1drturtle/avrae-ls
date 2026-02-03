@@ -12,17 +12,17 @@ from lsprotocol import types
 from pygls import uris
 from pygls.lsp.server import LanguageServer
 
-from .config import AvraeLSConfig, load_config
-from .context import ContextBuilder
-from .diagnostics import DiagnosticProvider
-from .runtime import MockExecutor
-from .alias_preview import render_alias_command, simulate_command
-from .parser import is_alias_module_path
-from .source_context import build_source_context, block_for_line
-from .signature_help import load_signatures, signature_help_for_code
-from .completions import gather_suggestions, completion_items_for_position, hover_for_position
-from .code_actions import code_actions_for_document
-from .symbols import build_symbol_table, document_symbols, find_definition_range, find_references, range_for_word
+from avrae_ls.config import AvraeLSConfig, load_config
+from avrae_ls.runtime.context import ContextBuilder
+from avrae_ls.analysis.diagnostics import DiagnosticProvider
+from avrae_ls.runtime.runtime import MockExecutor
+from avrae_ls.runtime.alias_preview import render_alias_command, simulate_command
+from avrae_ls.analysis.parser import is_alias_module_path
+from avrae_ls.analysis.source_context import build_source_context, code_for_position
+from avrae_ls.lsp.signature_help import load_signatures, signature_help_for_code
+from avrae_ls.lsp.completions import gather_suggestions, completion_items_for_position, hover_for_position
+from avrae_ls.lsp.code_actions import code_actions_for_document
+from avrae_ls.analysis.symbols import build_symbol_table, document_symbols, find_definition_range, find_references, range_for_word
 
 # Prefer package metadata so the server version matches the installed wheel.
 try:
@@ -218,17 +218,11 @@ def on_signature_help(server: AvraeLanguageServer, params: types.SignatureHelpPa
     doc = server.workspace.get_text_document(params.text_document.uri)
     is_module = _is_alias_module_document(doc)
     source_ctx = build_source_context(doc.source, is_module)
-    pos = params.position
-    if not source_ctx.blocks:
-        return signature_help_for_code(source_ctx.prepared, pos.line, pos.character, server._signatures)
-
-    block = block_for_line(source_ctx.blocks, pos.line)
-    if block:
-        rel_line = pos.line - block.line_offset
-        help_ = signature_help_for_code(block.code, rel_line, pos.character, server._signatures)
-        if help_:
-            return help_
-    return None
+    selected = code_for_position(source_ctx, params.position.line, params.position.character)
+    if selected is None:
+        return None
+    code, rel_line, rel_char = selected
+    return signature_help_for_code(code, rel_line, rel_char, server._signatures)
 
 
 @ls.feature(
@@ -241,46 +235,31 @@ def on_completion(server: AvraeLanguageServer, params: types.CompletionParams):
     suggestions = gather_suggestions(ctx_data, server.state.context_builder.gvar_resolver, server._signatures)
     is_module = _is_alias_module_document(doc)
     source_ctx = build_source_context(doc.source, is_module)
-    pos = params.position
-    if not source_ctx.blocks:
-        return completion_items_for_position(source_ctx.prepared, pos.line, pos.character, suggestions)
-
-    block = block_for_line(source_ctx.blocks, pos.line)
-    if block:
-        rel_line = pos.line - block.line_offset
-        return completion_items_for_position(block.code, rel_line, pos.character, suggestions)
-    return []
+    selected = code_for_position(source_ctx, params.position.line, params.position.character)
+    if selected is None:
+        return []
+    code, rel_line, rel_char = selected
+    return completion_items_for_position(code, rel_line, rel_char, suggestions)
 
 
 @ls.feature(types.TEXT_DOCUMENT_HOVER)
 def on_hover(server: AvraeLanguageServer, params: types.HoverParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
     ctx_data = server.state.context_builder.build()
-    pos = params.position
     is_module = _is_alias_module_document(doc)
     source_ctx = build_source_context(doc.source, is_module)
-    if not source_ctx.blocks:
-        return hover_for_position(
-            source_ctx.prepared,
-            pos.line,
-            pos.character,
-            server._signatures,
-            ctx_data,
-            server.state.context_builder.gvar_resolver,
-        )
-
-    block = block_for_line(source_ctx.blocks, pos.line)
-    if block:
-        rel_line = pos.line - block.line_offset
-        return hover_for_position(
-            block.code,
-            rel_line,
-            pos.character,
-            server._signatures,
-            ctx_data,
-            server.state.context_builder.gvar_resolver,
-        )
-    return None
+    selected = code_for_position(source_ctx, params.position.line, params.position.character)
+    if selected is None:
+        return None
+    code, rel_line, rel_char = selected
+    return hover_for_position(
+        code,
+        rel_line,
+        rel_char,
+        server._signatures,
+        ctx_data,
+        server.state.context_builder.gvar_resolver,
+    )
 
 
 @ls.feature(types.TEXT_DOCUMENT_CODE_ACTION)

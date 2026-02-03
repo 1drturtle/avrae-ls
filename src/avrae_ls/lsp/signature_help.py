@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 from lsprotocol import types
 
-from .runtime import _default_builtins
+from avrae_ls.runtime.runtime import _default_builtins
 
 
 @dataclass

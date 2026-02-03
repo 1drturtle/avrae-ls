@@ -10,8 +10,8 @@ from typing import Any, Dict, Iterable
 
 import httpx
 
-from .config import AvraeLSConfig, ContextProfile, VarSources
-from .cvars import derive_character_cvars
+from avrae_ls.config import AvraeLSConfig, ContextProfile, VarSources
+from avrae_ls.runtime.cvars import derive_character_cvars
 
 log = logging.getLogger(__name__)
 _SKIP_GVAR = object()

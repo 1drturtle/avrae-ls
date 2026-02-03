@@ -4,9 +4,9 @@ from pathlib import Path
 from lsprotocol import types
 from pygls.workspace import Workspace
 
-from avrae_ls.code_actions import code_actions_for_document
-from avrae_ls.codes import MISSING_GVAR_CODE, UNDEFINED_NAME_CODE, UNSUPPORTED_IMPORT_CODE
-from avrae_ls.server import AvraeLanguageServer, on_code_action
+from avrae_ls.lsp.code_actions import code_actions_for_document
+from avrae_ls.lsp.codes import MISSING_GVAR_CODE, UNDEFINED_NAME_CODE, UNSUPPORTED_IMPORT_CODE
+from avrae_ls.lsp.server import AvraeLanguageServer, on_code_action
 
 
 def _params(rng: types.Range, diagnostics: list[types.Diagnostic]) -> types.CodeActionParams:

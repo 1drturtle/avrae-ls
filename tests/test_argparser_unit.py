@@ -1,7 +1,7 @@
 import pytest
 
-from avrae_ls import argparser
-from avrae_ls.argparser import Argument, EphemeralArgument
+from avrae_ls.runtime import argparser
+from avrae_ls.runtime.argparser import Argument, EphemeralArgument
 
 
 def test_argparse_arg_respects_ephemeral_flag():

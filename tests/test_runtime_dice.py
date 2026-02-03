@@ -1,9 +1,9 @@
 import pytest
 
-from avrae_ls.api import SimpleRollResult
+from avrae_ls.runtime.api import SimpleRollResult
 from avrae_ls.config import VarSources
-from avrae_ls.context import ContextData
-from avrae_ls.runtime import MockExecutor
+from avrae_ls.runtime.context import ContextData
+from avrae_ls.runtime.runtime import MockExecutor
 
 
 def _ctx():

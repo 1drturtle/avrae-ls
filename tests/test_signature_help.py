@@ -4,8 +4,8 @@ from pathlib import Path
 
 from pygls.workspace import Workspace
 
-from avrae_ls.signature_help import FunctionSig, signature_help_for_code
-from avrae_ls.server import AvraeLanguageServer, on_signature_help
+from avrae_ls.lsp.signature_help import FunctionSig, signature_help_for_code
+from avrae_ls.lsp.server import AvraeLanguageServer, on_signature_help
 
 
 def _call_sig(code: str, cursor: tuple[int, int]):

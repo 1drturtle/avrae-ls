@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from avrae_ls.config import AvraeLSConfig
-from avrae_ls.context import ContextBuilder, GVarResolver
-from avrae_ls.server import AvraeLanguageServer, refresh_gvars
+from avrae_ls.runtime.context import ContextBuilder, GVarResolver
+from avrae_ls.lsp.server import AvraeLanguageServer, refresh_gvars
 
 
 @pytest.mark.asyncio
@@ -91,7 +91,7 @@ async def test_missing_gvar_fetches_when_enabled(monkeypatch):
         async def aclose(self):
             return None
 
-    monkeypatch.setattr("avrae_ls.context.httpx.AsyncClient", DummyClient)
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
 
     fetched = await resolver.ensure("abc123")
 
@@ -134,7 +134,7 @@ async def test_ensure_many_fetches_concurrently(monkeypatch):
             calls.append(key)
             return DummyResponse(key)
 
-    monkeypatch.setattr("avrae_ls.context.httpx.AsyncClient", DummyClient)
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
 
     results = await resolver.ensure_many(["a", "b"])
 
@@ -181,7 +181,7 @@ async def test_refresh_fetches_multiple_when_enabled(monkeypatch):
         async def aclose(self):
             return None
 
-    monkeypatch.setattr("avrae_ls.context.httpx.AsyncClient", DummyClient)
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
 
     snapshot = await resolver.refresh({"seed": "present"}, keys=["g1", "g2"])
 

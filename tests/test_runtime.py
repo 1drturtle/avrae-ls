@@ -1,10 +1,10 @@
 import httpx
 import pytest
 
-from avrae_ls.argparser import InvalidArgument
+from avrae_ls.runtime.argparser import InvalidArgument
 from avrae_ls.config import AvraeLSConfig, VarSources
-from avrae_ls.context import ContextBuilder, ContextData, GVarResolver
-from avrae_ls.runtime import FunctionRequiresCharacter, MockExecutor, _parse_coins
+from avrae_ls.runtime.context import ContextBuilder, ContextData, GVarResolver
+from avrae_ls.runtime.runtime import FunctionRequiresCharacter, MockExecutor, _parse_coins
 
 
 def _ctx():
@@ -101,7 +101,7 @@ async def test_alias_block_executes(tmp_path):
     executor = MockExecutor()
     ctx = _ctx()
     resolver = _resolver(tmp_path)
-    from avrae_ls.parser import primary_block_or_source
+    from avrae_ls.analysis.parser import primary_block_or_source
 
     alias_text = "!alias hello echo\n<drac2>\nx = 3\nreturn x\n</drac2>"
     code, _, _ = primary_block_or_source(alias_text)
@@ -241,7 +241,7 @@ async def test_combat_returns_none_when_missing(tmp_path):
 @pytest.mark.asyncio
 async def test_combat_combatants_executes(tmp_path):
     from avrae_ls.config import AvraeLSConfig
-    from avrae_ls.context import ContextBuilder
+    from avrae_ls.runtime.context import ContextBuilder
 
     cfg = AvraeLSConfig.default(tmp_path)
     ctx = ContextBuilder(cfg).build()
@@ -498,7 +498,7 @@ async def test_verify_signature_cached(monkeypatch, tmp_path):
             },
         )
 
-    monkeypatch.setattr("avrae_ls.runtime.httpx.post", _fake_post)
+    monkeypatch.setattr("avrae_ls.runtime.runtime.httpx.post", _fake_post)
 
     result = await executor.run("verify_signature('sig1')\nverify_signature('sig1')", ctx, resolver)
     assert result.error is None
@@ -542,7 +542,7 @@ async def test_nested_using_prefetches_dependencies(monkeypatch, tmp_path):
             key = url.rsplit("/", 1)[-1]
             return DummyResponse(key)
 
-    monkeypatch.setattr("avrae_ls.context.httpx.AsyncClient", DummyClient)
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
 
     result = await executor.run('using(bag="bag")\nreturn bag.value + bag.nested.answer', ctx, resolver)
 
@@ -585,7 +585,7 @@ async def test_verify_signature_does_not_retry(monkeypatch, tmp_path):
         calls.append(json.get("signature") if isinstance(json, dict) else "")
         raise httpx.TimeoutException("network timeout")
 
-    monkeypatch.setattr("avrae_ls.runtime.httpx.post", _fake_post)
+    monkeypatch.setattr("avrae_ls.runtime.runtime.httpx.post", _fake_post)
 
     executor = MockExecutor()
     ctx = _ctx()
@@ -600,7 +600,7 @@ async def test_verify_signature_http_error(monkeypatch, tmp_path):
     def _fake_post(url, json=None, headers=None, timeout=None):
         return httpx.Response(500, json={"error": "nope"})
 
-    monkeypatch.setattr("avrae_ls.runtime.httpx.post", _fake_post)
+    monkeypatch.setattr("avrae_ls.runtime.runtime.httpx.post", _fake_post)
 
     executor = MockExecutor()
     ctx = _ctx()

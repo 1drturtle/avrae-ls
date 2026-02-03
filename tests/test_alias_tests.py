@@ -1,10 +1,10 @@
 import pytest
 
-from avrae_ls.alias_tests import AliasTestError, parse_alias_tests, run_alias_tests
+from avrae_ls.testing.alias_tests import AliasTestError, parse_alias_tests, run_alias_tests
 from avrae_ls.__main__ import _run_alias_tests
 from avrae_ls.config import AvraeLSConfig
-from avrae_ls.context import ContextBuilder
-from avrae_ls.runtime import MockExecutor
+from avrae_ls.runtime.context import ContextBuilder
+from avrae_ls.runtime.runtime import MockExecutor
 
 
 @pytest.mark.asyncio

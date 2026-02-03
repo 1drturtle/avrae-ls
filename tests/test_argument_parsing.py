@@ -1,4 +1,4 @@
-from avrae_ls.argument_parsing import apply_argument_parsing
+from avrae_ls.runtime.argument_parsing import apply_argument_parsing
 
 
 def test_argument_parsing_replacements():

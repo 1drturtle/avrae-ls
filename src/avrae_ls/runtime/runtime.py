@@ -19,10 +19,10 @@ import draconic
 import httpx
 from draconic.interpreter import _Break, _Continue, _Return
 
-from .context import ContextData, GVarResolver
-from .config import AvraeServiceConfig, VarSources
-from .api import AliasContextAPI, CharacterAPI, SimpleCombat, SimpleRollResult
-from . import argparser as avrae_argparser
+from avrae_ls.runtime.context import ContextData, GVarResolver
+from avrae_ls.config import AvraeServiceConfig, VarSources
+from avrae_ls.runtime.api import AliasContextAPI, CharacterAPI, SimpleCombat, SimpleRollResult
+from avrae_ls.runtime import argparser as avrae_argparser
 
 _VERIFY_SIGNATURE_TIMEOUT = 5.0
 _VERIFY_SIGNATURE_RETRIES = 0

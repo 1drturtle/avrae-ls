@@ -2,11 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from avrae_ls.api import CharacterAPI
-from avrae_ls.completions import hover_for_position
+from avrae_ls.runtime.api import CharacterAPI
+from avrae_ls.lsp.completions import hover_for_position
 from avrae_ls.config import AvraeLSConfig, VarSources
-from avrae_ls.context import ContextData, ContextBuilder, GVarResolver
-from avrae_ls.signature_help import load_signatures
+from avrae_ls.runtime.context import ContextData, ContextBuilder, GVarResolver
+from avrae_ls.lsp.signature_help import load_signatures
 
 
 def _ctx_with_vars() -> tuple[ContextData, GVarResolver]:

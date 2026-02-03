@@ -6,7 +6,7 @@ from typing import Any, ClassVar, Iterable, Mapping, MutableMapping, Optional, S
 
 import d20
 
-from .dice import RerollableStringifier
+from avrae_ls.runtime.dice import RerollableStringifier
 
 UNSET = object()
 

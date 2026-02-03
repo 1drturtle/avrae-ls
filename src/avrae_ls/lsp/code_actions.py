@@ -9,9 +9,9 @@ from typing import Iterable, List, Sequence
 
 from lsprotocol import types
 
-from .codes import MISSING_GVAR_CODE, UNDEFINED_NAME_CODE, UNSUPPORTED_IMPORT_CODE
-from .parser import DraconicBlock
-from .source_context import build_source_context
+from avrae_ls.lsp.codes import MISSING_GVAR_CODE, UNDEFINED_NAME_CODE, UNSUPPORTED_IMPORT_CODE
+from avrae_ls.analysis.parser import DraconicBlock
+from avrae_ls.analysis.source_context import build_source_context
 
 log = logging.getLogger(__name__)
 
@@ -117,13 +117,7 @@ def _stub_variable_action(
     name: str,
 ) -> types.CodeAction:
     insertion_line, indent = _block_insertion(blocks, diag.range.start.line, source)
-    edit = types.TextEdit(
-        range=types.Range(
-            start=types.Position(line=insertion_line, character=indent),
-            end=types.Position(line=insertion_line, character=indent),
-        ),
-        new_text=f"{' ' * indent}{name} = None\n",
-    )
+    edit = _insert_line_edit(insertion_line, indent, f"{name} = None\n")
     return types.CodeAction(
         title=f"Create stub variable '{name}'",
         kind=types.CodeActionKind.QuickFix,
@@ -141,14 +135,7 @@ def _using_stub_action(
 ) -> types.CodeAction:
     alias = _sanitize_symbol(gvar_id)
     insertion_line, indent = _block_insertion(blocks, diag.range.start.line, source)
-    text = f"{' ' * indent}using({alias}=\"{gvar_id}\")\n"
-    edit = types.TextEdit(
-        range=types.Range(
-            start=types.Position(line=insertion_line, character=indent),
-            end=types.Position(line=insertion_line, character=indent),
-        ),
-        new_text=text,
-    )
+    edit = _insert_line_edit(insertion_line, indent, f'using({alias}="{gvar_id}")\n')
     return types.CodeAction(
         title=f"Add using() stub for gvar '{gvar_id}'",
         kind=types.CodeActionKind.QuickFix,
@@ -177,11 +164,20 @@ def _rewrite_import_action(
 def _block_insertion(blocks: list[DraconicBlock], line: int, source: str) -> tuple[int, int]:
     for block in blocks:
         start = block.line_offset
-        end = block.line_offset + block.line_count
+        end = block.line_offset + block.line_count - 1
         if start <= line <= end:
             indent = _line_indent(source, start, default=block.char_offset)
             return start, indent
     return 0, _line_indent(source, 0, default=0)
+
+
+def _insert_line_edit(line: int, indent: int, body: str) -> types.TextEdit:
+    padding = " " * indent
+    pos = types.Position(line=line, character=indent)
+    return types.TextEdit(
+        range=types.Range(start=pos, end=pos),
+        new_text=f"{padding}{body}",
+    )
 
 
 def _line_indent(source: str, line: int, default: int = 0) -> int:
