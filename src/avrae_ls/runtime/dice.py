@@ -8,7 +8,7 @@ class RerollableStringifier(d20.SimpleStringifier):
 
     def _stringify(self, node):
         if not node.kept:
-            return None
+            return ""
         return super()._stringify(node)
 
     def _str_expression(self, node):
@@ -21,7 +21,8 @@ class RerollableStringifier(d20.SimpleStringifier):
         return f"({self._stringify(node.value)})"
 
     def _str_set(self, node):
-        out = f"{', '.join([self._stringify(v) for v in node.values if v.kept])}"
+        values = [value for value in (self._stringify(v) for v in node.values if v.kept) if value]
+        out = ", ".join(values)
         if len(node.values) == 1:
             return f"({out},)"
         return f"({out})"

@@ -6,7 +6,7 @@ import difflib
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 import yaml
 
@@ -188,7 +188,7 @@ def _run_alias_tests(
     return 1 if failures or parse_errors else 0
 
 
-def _print_test_results(results: Iterable[AliasTestResult], workspace_root: Path) -> None:
+def _print_test_results(results: Sequence[AliasTestResult], workspace_root: Path) -> None:
     total = len(results)
     passed = 0
     for res in results:

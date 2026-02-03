@@ -41,7 +41,7 @@ class ContextBuilder:
         profile_combat = copy.deepcopy(profile.combat)
         profile_ctx = copy.deepcopy(profile.ctx)
 
-        combat = self._ensure_me_combatant(profile_combat, profile_ctx.get("author"))
+        combat = self._ensure_me_combatant(profile_combat, profile_character, profile_ctx.get("author"))
         merged_vars = self._merge_character_cvars(profile_character, self._load_var_files().merge(profile.vars))
         self._gvar_resolver.reset(merged_vars.gvars)
         return ContextData(
@@ -78,8 +78,13 @@ class ContextBuilder:
             merged = merged.merge(VarSources(cvars=builtin_cvars))
         return merged
 
-    def _ensure_me_combatant(self, profile: Dict[str, Any], ctx_author: Dict[str, Any] | None) -> Dict[str, Any]:
-        combat = dict(profile or {})
+    def _ensure_me_combatant(
+        self,
+        profile_combat: Dict[str, Any],
+        character: Dict[str, Any],
+        ctx_author: Dict[str, Any] | None,
+    ) -> Dict[str, Any]:
+        combat = dict(profile_combat or {})
         combatants = list(combat.get("combatants") or [])
         me = combat.get("me")
         author_id = (ctx_author or {}).get("id")
@@ -98,32 +103,32 @@ class ContextBuilder:
                     break
 
         # If still missing, synthesize a combatant from the character sheet.
-        if me is None and profile.character:
+        if me is None and character:
             me = {
-                "name": profile.character.get("name", "Player"),
+                "name": character.get("name", "Player"),
                 "id": "cmb_player",
                 "controller": author_id,
                 "group": None,
-                "race": profile.character.get("race"),
+                "race": character.get("race"),
                 "monster_name": None,
                 "is_hidden": False,
-                "init": profile.character.get("stats", {}).get("dexterity", 10),
+                "init": character.get("stats", {}).get("dexterity", 10),
                 "initmod": 0,
                 "type": "combatant",
                 "note": "Mock combatant for preview",
                 "effects": [],
-                "stats": profile.character.get("stats") or {},
-                "levels": profile.character.get("levels") or profile.character.get("class_levels") or {},
-                "skills": profile.character.get("skills") or {},
-                "saves": profile.character.get("saves") or {},
-                "resistances": profile.character.get("resistances") or {},
-                "spellbook": profile.character.get("spellbook") or {},
-                "attacks": profile.character.get("attacks") or [],
-                "max_hp": profile.character.get("max_hp"),
-                "hp": profile.character.get("hp"),
-                "temp_hp": profile.character.get("temp_hp"),
-                "ac": profile.character.get("ac"),
-                "creature_type": profile.character.get("creature_type"),
+                "stats": character.get("stats") or {},
+                "levels": character.get("levels") or character.get("class_levels") or {},
+                "skills": character.get("skills") or {},
+                "saves": character.get("saves") or {},
+                "resistances": character.get("resistances") or {},
+                "spellbook": character.get("spellbook") or {},
+                "attacks": character.get("attacks") or [],
+                "max_hp": character.get("max_hp"),
+                "hp": character.get("hp"),
+                "temp_hp": character.get("temp_hp"),
+                "ac": character.get("ac"),
+                "creature_type": character.get("creature_type"),
             }
 
         if me is not None:

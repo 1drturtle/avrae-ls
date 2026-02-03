@@ -94,7 +94,7 @@ def _split_annotation_string(text: str) -> tuple[Optional[str], Optional[str]]:
     return base_norm, elem
 
 
-def _annotation_types(node: ast.AST | None) -> tuple[Optional[str], Optional[str]]:
+def _annotation_types(node: ast.AST | str | None) -> tuple[Optional[str], Optional[str]]:
     if node is None:
         return None, None
     if isinstance(node, str):
@@ -102,7 +102,7 @@ def _annotation_types(node: ast.AST | None) -> tuple[Optional[str], Optional[str
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return _split_annotation_string(node.value)
     if isinstance(node, ast.Str):
-        return _split_annotation_string(node.s)
+        return _split_annotation_string(node.s) if isinstance(node.s, str) else (None, None)
     if isinstance(node, ast.Name):
         return node.id, None
     if isinstance(node, ast.Attribute):
@@ -165,10 +165,6 @@ class _TypeInferencer(ast.NodeVisitor):
         ann_type, ann_elem = _annotation_types(getattr(node, "annotation", None))
         val_type = val_type or ann_type
         elem_type = elem_type or ann_elem
-        if getattr(node, "type_comment", None):
-            c_type, c_elem = _annotation_types(node.type_comment)
-            val_type = val_type or c_type
-            elem_type = elem_type or c_elem
         self._bind_target(node.target, val_type, elem_type, node.value)
         self.generic_visit(node)
 

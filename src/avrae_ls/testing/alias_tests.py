@@ -258,19 +258,19 @@ def diff_mismatched_parts(expected: Any, actual: Any) -> tuple[Any, Any] | None:
         return expected, actual
 
     if isinstance(expected, list) and isinstance(actual, list):
-        expected_diff: list[Any] = []
-        actual_diff: list[Any] = []
+        expected_list_diff: list[Any] = []
+        actual_list_diff: list[Any] = []
         for idx, expected_val in enumerate(expected):
             if idx >= len(actual):
-                expected_diff.append(expected_val)
-                actual_diff.append(MISSING_VALUE)
+                expected_list_diff.append(expected_val)
+                actual_list_diff.append(MISSING_VALUE)
                 continue
             sub_diff = diff_mismatched_parts(expected_val, actual[idx])
             if sub_diff:
-                expected_diff.append(sub_diff[0])
-                actual_diff.append(sub_diff[1])
-        if expected_diff:
-            return expected_diff, actual_diff
+                expected_list_diff.append(sub_diff[0])
+                actual_list_diff.append(sub_diff[1])
+        if expected_list_diff:
+            return expected_list_diff, actual_list_diff
         return expected, actual
 
     return expected, actual

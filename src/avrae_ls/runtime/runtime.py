@@ -100,13 +100,13 @@ def _yaml_dumper():
     class DraconicDumper(yaml.SafeDumper):
         pass
 
-    def _represent_user_list(dumper: yaml.Dumper, data: UserList):
+    def _represent_user_list(dumper: Any, data: UserList):
         return dumper.represent_sequence(dumper.DEFAULT_SEQUENCE_TAG, list(data))
 
-    def _represent_dict(dumper: yaml.Dumper, data: dict):
+    def _represent_dict(dumper: Any, data: dict):
         return dumper.represent_dict(dict(data))
 
-    def _represent_set(dumper: yaml.Dumper, data: set):
+    def _represent_set(dumper: Any, data: set):
         return dumper.represent_sequence(dumper.DEFAULT_SEQUENCE_TAG, list(data))
 
     DraconicDumper.add_multi_representer(UserList, _represent_user_list)
@@ -232,7 +232,7 @@ def _parse_coins(args: str, include_total: bool = True):
             pass
 
     coin_args = _parse_coin_args(str(args))
-    parsed = {
+    parsed: dict[str, int | float] = {
         "pp": coin_args.pp,
         "gp": coin_args.gp,
         "ep": coin_args.ep,
@@ -739,12 +739,14 @@ def _literal_gvars(code: str) -> Set[str]:
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     gvars.add(arg.value)
                 elif isinstance(arg, ast.Str):
-                    gvars.add(arg.s)
+                    if isinstance(arg.s, str):
+                        gvars.add(arg.s)
             elif node.func.id == "using":
                 for kw in node.keywords:
                     val = kw.value
                     if isinstance(val, ast.Constant) and isinstance(val.value, str):
                         gvars.add(val.value)
                     elif isinstance(val, ast.Str):
-                        gvars.add(val.s)
+                        if isinstance(val.s, str):
+                            gvars.add(val.s)
     return gvars

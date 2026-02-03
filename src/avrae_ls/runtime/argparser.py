@@ -1,8 +1,9 @@
 import collections
 import itertools
+import importlib
 import re
 import string
-from typing import ClassVar, Iterator
+from typing import Any, Callable, ClassVar, Iterable, Iterator
 
 
 class BadArgument(Exception):
@@ -159,9 +160,9 @@ def argparse(args, character=None, splitter=argsplit, parse_ephem=True) -> "Pars
         args = splitter(args)
 
     if character:
-        from aliasing.evaluators import MathEvaluator
-
-        evaluator = MathEvaluator.with_character(character)
+        evaluator_module = importlib.import_module("aliasing.evaluators")
+        math_evaluator = evaluator_module.MathEvaluator
+        evaluator = math_evaluator.with_character(character)
         args = [evaluator.transformed_str(a) for a in args]
 
     parsed_args = list(_argparse_iterator(args, parse_ephem))
@@ -186,8 +187,8 @@ class ParsedArguments:
         self._parsed = collections.defaultdict(lambda: [])
         for arg in args:
             self._parsed[arg.name].append(arg)
-        self._current_context = None
-        self._contexts = {}  # type: dict[..., ParsedArguments]
+        self._current_context: str | None = None
+        self._contexts: dict[str, ParsedArguments] = {}
 
     @classmethod
     def from_dict(cls, d):
@@ -200,7 +201,13 @@ class ParsedArguments:
     def empty_args(cls):
         return cls([])
 
-    def get(self, arg, default=None, type_=str, ephem=False):
+    def get(
+        self,
+        arg,
+        default=None,
+        type_: Callable[[Any], Any] = str,
+        ephem: bool = False,
+    ):
         if default is None:
             default = []
         parsed = list(self._get_values(arg, ephem=ephem))
@@ -211,7 +218,13 @@ class ParsedArguments:
         except (ValueError, TypeError):
             raise InvalidArgument(f"One or more arguments cannot be cast to {type_.__name__} (in `{arg}`)")
 
-    def last(self, arg, default=None, type_=str, ephem=False):
+    def last(
+        self,
+        arg,
+        default=None,
+        type_: Callable[[Any], Any] = str,
+        ephem: bool = False,
+    ):
         last_arg = self._get_last(arg, ephem=ephem)
         if last_arg is None:
             return default
@@ -220,7 +233,13 @@ class ParsedArguments:
         except (ValueError, TypeError):
             raise InvalidArgument(f"{last_arg} cannot be cast to {type_.__name__} (in `{arg}`)")
 
-    def adv(self, eadv=False, boolwise=False, ephem=False, custom: dict = None):
+    def adv(
+        self,
+        eadv: bool = False,
+        boolwise: bool = False,
+        ephem: bool = False,
+        custom: dict[str, str] | None = None,
+    ):
         adv_str, dis_str, ea_str = "adv", "dis", "eadv"
         if custom is not None:
             if "adv" in custom:
@@ -266,7 +285,7 @@ class ParsedArguments:
                 self[k] = v
 
     @staticmethod
-    def _yield_from_iterable(iterable: Iterator[Argument], ephem: bool):
+    def _yield_from_iterable(iterable: Iterable[Argument], ephem: bool):
         for value in iterable:
             if not ephem and isinstance(value, EphemeralArgument):
                 continue
@@ -277,13 +296,13 @@ class ParsedArguments:
             yield value.value
 
     def _get_values(self, arg, ephem=False):
-        iterable = self._parsed[arg]
+        iterable: Iterable[Argument] = self._parsed[arg]
         if self._current_context in self._contexts:
             iterable = itertools.chain(self._parsed[arg], self._contexts[self._current_context]._parsed[arg])
         yield from self._yield_from_iterable(iterable, ephem)
 
     def _get_last(self, arg, ephem=False):
-        iterable = reversed(self._parsed[arg])
+        iterable: Iterable[Argument] = reversed(self._parsed[arg])
         if self._current_context in self._contexts:
             iterable = itertools.chain(
                 reversed(self._contexts[self._current_context]._parsed[arg]), reversed(self._parsed[arg])
@@ -392,7 +411,7 @@ class CustomStringView(StringView):
 
             if current == "\\":
                 next_char = self.get()
-                if next_char in _escaped_quotes:
+                if next_char is not None and next_char in _escaped_quotes:
                     result.append(next_char)
                 else:
                     self.undo()

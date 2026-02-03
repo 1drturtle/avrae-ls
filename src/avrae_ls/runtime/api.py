@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Iterable, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, ClassVar, Iterable, Iterator, Mapping, MutableMapping, Optional, Sequence
 
 import d20
 
@@ -494,6 +494,8 @@ class AliasSkill(_DirMixin):
     @property
     def prof(self) -> float | int:
         raw = self._data.get("prof")
+        if raw is None:
+            return 0
         try:
             return float(raw)
         except Exception:
@@ -569,7 +571,7 @@ class AliasSkills(_DirMixin):
             skill_data = {"value": ability_mod, "prof": 0, "bonus": 0, "adv": None}
         return AliasSkill(skill_data)
 
-    def __iter__(self) -> Iterable[tuple[str, AliasSkill]]:
+    def __iter__(self) -> Iterator[tuple[str, AliasSkill]]:
         for name in _SKILL_ABILITIES.keys():
             yield name, self._get_skill(name)
 
@@ -595,7 +597,7 @@ class AliasSaves(_DirMixin):
             raw = {"value": math.floor((ability_score - 10) / 2)}
         return AliasSkill(raw)
 
-    def __iter__(self) -> Iterable[tuple[str, AliasSkill]]:
+    def __iter__(self) -> Iterator[tuple[str, AliasSkill]]:
         for key in ("str", "dex", "con", "int", "wis", "cha"):
             yield key, self.get(key)
 
@@ -1593,7 +1595,7 @@ class SimpleEffect(_DirMixin):
         return str(val) if val is not None else None
 
     @property
-    def parent(self) -> "SimpleEffect" | None:
+    def parent(self) -> SimpleEffect | None:
         parent = self._data.get("parent")
         return SimpleEffect(parent) if parent else None
 

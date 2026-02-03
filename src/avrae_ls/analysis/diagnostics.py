@@ -305,7 +305,7 @@ async def _check_gvars(
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return node.value
         if isinstance(node, ast.Str):
-            return node.s
+            return node.s if isinstance(node.s, str) else None
         return None
 
     for node in _iter_calls(body):
@@ -384,7 +384,8 @@ def _check_api_misuse(
 ) -> List[types.Diagnostic]:
     """Heuristics for common API mistakes (list vs scalar, missing context, property calls)."""
     diagnostics: list[types.Diagnostic] = []
-    module = ast.Module(body=list(body), type_ignores=[])
+    stmts = [node for node in body if isinstance(node, ast.stmt)]
+    module = ast.Module(body=stmts, type_ignores=[])
     parent_map = _build_parent_map(module)
     assigned_names = _collect_assigned_names(module)
     type_map = _diagnostic_type_map(code)

@@ -379,8 +379,9 @@ def _function_locals_at_node(
             self.generic_visit(node)
 
         def visit_ExceptHandler(self, node: ast.ExceptHandler):
-            if isinstance(getattr(node, "name", None), str):
-                _add_name(node.name)
+            name = node.name if isinstance(node.name, str) else None
+            if name is not None:
+                _add_name(name)
             self.generic_visit(node)
 
     LocalCollector().visit(target)
@@ -485,7 +486,8 @@ def _sanitize_incomplete_line(code: str, line: int, character: int) -> str:
                     pass
                 else:
                     return candidate
-            indent = re.match(r"[ \t]*", lines[line]).group(0)
+            indent_match = re.match(r"[ \t]*", lines[line])
+            indent = indent_match.group(0) if indent_match else ""
             lines[line] = indent + "pass"
     return "\n".join(lines)
 

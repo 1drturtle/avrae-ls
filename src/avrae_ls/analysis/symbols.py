@@ -214,7 +214,7 @@ def _references_from_code(
     return [shift_range(rng, local_offset, char_offset) for rng in collector.ranges]
 
 
-def _parse_draconic(code: str) -> tuple[list[ast.AST], int]:
+def _parse_draconic(code: str) -> tuple[list[ast.stmt], int]:
     parser = draconic.DraconicInterpreter()
     try:
         return parser.parse(code), 0

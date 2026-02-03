@@ -95,7 +95,11 @@ ls = AvraeLanguageServer()
 @ls.feature(types.INITIALIZE)
 def on_initialize(server: AvraeLanguageServer, params: types.InitializeParams):
     root_uri = params.root_uri or (params.workspace_folders[0].uri if params.workspace_folders else None)
-    root_path = Path(uris.to_fs_path(root_uri)) if root_uri else Path.cwd()
+    if root_uri:
+        fs_path = uris.to_fs_path(root_uri)
+        root_path = Path(fs_path) if fs_path else Path.cwd()
+    else:
+        root_path = Path.cwd()
     server.load_workspace(root_path)
 
 
@@ -441,7 +445,9 @@ def _find_using_range(source: str, module: str | None) -> types.Range | None:
                 if kw.arg and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
                     if kw.value.value == module:
                         start = types.Position(line=node.lineno - 1, character=node.col_offset)
-                        end = types.Position(line=node.end_lineno - 1, character=node.end_col_offset)
+                        end_line = (node.end_lineno or node.lineno) - 1
+                        end_char = node.end_col_offset if node.end_col_offset is not None else node.col_offset + 1
+                        end = types.Position(line=end_line, character=end_char)
                         return types.Range(start=start, end=end)
     return None
 
@@ -454,7 +460,10 @@ def _is_alias_module_document(doc: Any) -> bool:
     if not isinstance(uri, str):
         return False
     try:
-        path = Path(uris.to_fs_path(uri))
+        fs_path = uris.to_fs_path(uri)
+        if not fs_path:
+            return uri.endswith(".alias-module")
+        path = Path(fs_path)
     except Exception:
         return uri.endswith(".alias-module")
     return is_alias_module_path(path)

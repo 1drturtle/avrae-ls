@@ -693,9 +693,9 @@ def _type_names_from_annotation(ann: Any, reverse_type_map: Dict[type, str]) -> 
         if args:
             elem = args[0]
             elem_name, _ = _type_names_from_annotation(elem, reverse_type_map)
-            container_name = reverse_type_map.get(origin) or "list"
+            container_name = reverse_type_map.get(origin, "list") if isinstance(origin, type) else "list"
             return container_name, elem_name
-        return reverse_type_map.get(origin) or "list", ""
+        return (reverse_type_map.get(origin, "list") if isinstance(origin, type) else "list"), ""
 
     if isinstance(ann, type) and ann in reverse_type_map:
         return reverse_type_map[ann], ""

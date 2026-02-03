@@ -82,6 +82,12 @@ def derive_character_cvars(character: Mapping[str, Any]) -> Dict[str, Any]:
 def _int_or_none(value: Any) -> int | None:
     if isinstance(value, dict) and "value" in value:
         value = value.get("value")
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if not isinstance(value, (int, float, str)):
+        return None
     try:
         return int(value)
     except (TypeError, ValueError):

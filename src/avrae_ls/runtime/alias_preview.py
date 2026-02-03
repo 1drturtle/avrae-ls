@@ -399,7 +399,7 @@ def _extract_command_head_and_payload(text: str) -> tuple[str | None, str]:
     if not lines:
         return None, ""
     head, payload = _split_head_and_payload_from_line(lines[0])
-    if _is_embed_flag(head):
+    if head and _is_embed_flag(head):
         # Treat the entire payload (including the head line) as embed flags so multiple lines are preserved.
         return head, "\n".join(lines)
     if head and head.lower() in ("embed", "echo"):

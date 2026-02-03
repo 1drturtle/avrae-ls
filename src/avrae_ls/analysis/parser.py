@@ -41,7 +41,7 @@ def _full_source_block(source: str) -> DraconicBlock:
 def find_draconic_blocks(source: str, *, treat_as_module: bool = False) -> List[DraconicBlock]:
     if treat_as_module:
         return [_full_source_block(source)]
-    matches: list[tuple[int, DraconicBlock]] = []
+    matches: list[tuple[int, int, DraconicBlock]] = []
 
     def _block_from_match(match: re.Match[str], inline: bool = False) -> tuple[int, int, DraconicBlock]:
         raw = match.group(1)
