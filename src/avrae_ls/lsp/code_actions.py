@@ -103,9 +103,6 @@ def _snippet_actions(
             kind=snippet.kind,
             edit=types.WorkspaceEdit(changes={params.text_document.uri: [edit]}),
         )
-        if snippet.description:
-            action.diagnostics = None
-            action.command = None
         yield action
 
 

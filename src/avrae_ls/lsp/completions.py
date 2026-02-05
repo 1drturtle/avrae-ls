@@ -236,10 +236,6 @@ def _current_prefix(line_text: str) -> str:
     return match.group(0) if match else ""
 
 
-def _word_from_line(text: str, cursor: int) -> str:
-    return _word_at_position(text, cursor)[0]
-
-
 def _word_at_position(text: str, cursor: int) -> tuple[str, int, int]:
     cursor = max(0, min(cursor, len(text)))
     start = cursor

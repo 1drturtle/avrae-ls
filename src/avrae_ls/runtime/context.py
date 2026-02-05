@@ -164,6 +164,44 @@ class GVarResolver:
             self._cache[str(key)] = None
         return True
 
+    def _request_target(self, key: str) -> tuple[str, dict[str, str]]:
+        base_url = self._config.service.base_url.rstrip("/")
+        url = f"{base_url}/customizations/gvars/{key}"
+        headers = {"Authorization": str(self._config.service.token)}
+        return url, headers
+
+    def _handle_gvar_response(self, key: str, resp: httpx.Response, *, blocking: bool) -> bool:
+        prefix = "GVAR blocking fetch" if blocking else "GVAR fetch"
+        if resp.status_code != 200:
+            if not self._config.silent_gvar_fetch:
+                log.warning(
+                    "%s returned %s for %s (body: %s)",
+                    prefix,
+                    resp.status_code,
+                    key,
+                    (resp.text or "").strip(),
+                )
+            return self._silent_failure(key)
+
+        value: Any = None
+        try:
+            payload = resp.json()
+        except Exception:
+            payload = None
+
+        if isinstance(payload, dict) and "value" in payload:
+            value = payload["value"]
+
+        if not blocking:
+            log.debug("GVAR fetch parsed value for %s (type=%s)", key, type(value).__name__)
+
+        if value is None:
+            if not self._config.silent_gvar_fetch:
+                log.error("GVAR %s payload missing value", key)
+            return self._silent_failure(key)
+        self._cache[key] = value
+        return True
+
     def reset(self, gvars: Dict[str, Any] | None = None) -> None:
         self._cache = {}
         if gvars:
@@ -241,9 +279,7 @@ class GVarResolver:
                 log.debug("GVAR fetch skipped for %s: no token configured", key)
             return self._silent_failure(key)
 
-        base_url = self._config.service.base_url.rstrip("/")
-        url = f"{base_url}/customizations/gvars/{key}"
-        headers = {"Authorization": str(self._config.service.token)}
+        url, headers = self._request_target(key)
         try:
             log.debug("GVAR blocking fetch %s from %s", key, url)
             with httpx.Client(timeout=5) as client:
@@ -252,32 +288,7 @@ class GVarResolver:
             if not self._config.silent_gvar_fetch:
                 log.error("GVAR blocking fetch failed for %s: %s", key, exc)
             return self._silent_failure(key)
-
-        if resp.status_code != 200:
-            if not self._config.silent_gvar_fetch:
-                log.warning(
-                    "GVAR blocking fetch returned %s for %s (body: %s)",
-                    resp.status_code,
-                    key,
-                    (resp.text or "").strip(),
-                )
-            return self._silent_failure(key)
-
-        value: Any = None
-        try:
-            payload = resp.json()
-        except Exception:
-            payload = None
-
-        if isinstance(payload, dict) and "value" in payload:
-            value = payload["value"]
-
-        if value is None:
-            if not self._config.silent_gvar_fetch:
-                log.error("GVAR %s payload missing value", key)
-            return self._silent_failure(key)
-        self._cache[key] = value
-        return True
+        return self._handle_gvar_response(key, resp, blocking=True)
 
     def snapshot(self) -> Dict[str, Any]:
         return dict(self._cache)
@@ -299,9 +310,7 @@ class GVarResolver:
         if not self._config.service.token:
             return self._silent_failure(key)
 
-        base_url = self._config.service.base_url.rstrip("/")
-        url = f"{base_url}/customizations/gvars/{key}"
-        headers = {"Authorization": str(self._config.service.token)}
+        url, headers = self._request_target(key)
 
         async def _do_request(session: httpx.AsyncClient) -> httpx.Response:
             if sem:
@@ -326,34 +335,7 @@ class GVarResolver:
             return self._silent_failure(key)
         if close_client:
             await session.aclose()
-
-        if resp.status_code != 200:
-            if not self._config.silent_gvar_fetch:
-                log.warning(
-                    "GVAR fetch returned %s for %s (body: %s)",
-                    resp.status_code,
-                    key,
-                    (resp.text or "").strip(),
-                )
-            return self._silent_failure(key)
-
-        value: Any = None
-        try:
-            payload = resp.json()
-        except Exception:
-            payload = None
-
-        if isinstance(payload, dict) and "value" in payload:
-            value = payload["value"]
-
-        log.debug("GVAR fetch parsed value for %s (type=%s)", key, type(value).__name__)
-
-        if value is None:
-            if not self._config.silent_gvar_fetch:
-                log.error("GVAR %s payload missing value", key)
-            return self._silent_failure(key)
-        self._cache[key] = value
-        return True
+        return self._handle_gvar_response(key, resp, blocking=False)
 
 
 

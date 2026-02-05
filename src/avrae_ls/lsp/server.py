@@ -393,11 +393,6 @@ def _format_runtime_error(error: BaseException) -> str:
         return error.msg
     return str(error)
 
-
-def _runtime_diagnostic(error: BaseException, level: str) -> types.Diagnostic:
-    return _runtime_diagnostic_with_source(error, level, None)
-
-
 def _runtime_diagnostic_with_source(error: BaseException, level: str, source: str | None) -> types.Diagnostic:
     severity = LEVEL_TO_SEVERITY.get(level.lower(), types.DiagnosticSeverity.Error)
     if source and hasattr(error, "module"):

@@ -20,7 +20,7 @@ from avrae_ls.testing.alias_tests import (
     parse_alias_tests,
     run_alias_tests,
 )
-from avrae_ls.config import CONFIG_FILENAME, load_config
+from avrae_ls.config import AvraeLSConfig, CONFIG_FILENAME, load_config
 from avrae_ls.runtime.context import ContextBuilder
 from avrae_ls.analysis.diagnostics import DiagnosticProvider
 from avrae_ls.runtime.runtime import MockExecutor
@@ -116,15 +116,13 @@ def _run_analysis(
     log = logging.getLogger(__name__)
     log.info("Analyzing %s (workspace root: %s)", path, workspace_root)
 
-    config, warnings = load_config(workspace_root, default_enable_gvar_fetch=True)
-    if token_override:
-        config.service.token = token_override
-    if base_url_override:
-        config.service.base_url = base_url_override
-    if silent_gvar_fetch:
-        config.silent_gvar_fetch = True
-    for warning in warnings:
-        log.warning(warning)
+    config = _load_runtime_config(
+        workspace_root,
+        token_override=token_override,
+        base_url_override=base_url_override,
+        silent_gvar_fetch=silent_gvar_fetch,
+        log=log,
+    )
 
     builder = ContextBuilder(config)
     ctx_data = builder.build()
@@ -152,15 +150,13 @@ def _run_alias_tests(
     log = logging.getLogger(__name__)
     log.info("Running alias tests in %s (workspace root: %s)", target, workspace_root)
 
-    config, warnings = load_config(workspace_root, default_enable_gvar_fetch=True)
-    if token_override:
-        config.service.token = token_override
-    if base_url_override:
-        config.service.base_url = base_url_override
-    if silent_gvar_fetch:
-        config.silent_gvar_fetch = True
-    for warning in warnings:
-        log.warning(warning)
+    config = _load_runtime_config(
+        workspace_root,
+        token_override=token_override,
+        base_url_override=base_url_override,
+        silent_gvar_fetch=silent_gvar_fetch,
+        log=log,
+    )
 
     builder = ContextBuilder(config)
     executor = MockExecutor(config.service)
@@ -186,6 +182,26 @@ def _run_alias_tests(
 
     failures = [res for res in results if not res.passed]
     return 1 if failures or parse_errors else 0
+
+
+def _load_runtime_config(
+    workspace_root: Path,
+    *,
+    token_override: str | None,
+    base_url_override: str | None,
+    silent_gvar_fetch: bool,
+    log: logging.Logger,
+) -> AvraeLSConfig:
+    config, warnings = load_config(workspace_root, default_enable_gvar_fetch=True)
+    if token_override:
+        config.service.token = token_override
+    if base_url_override:
+        config.service.base_url = base_url_override
+    if silent_gvar_fetch:
+        config.silent_gvar_fetch = True
+    for warning in warnings:
+        log.warning(warning)
+    return config
 
 
 def _print_test_results(results: Sequence[AliasTestResult], workspace_root: Path) -> None:

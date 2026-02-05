@@ -33,6 +33,27 @@ class _DirMixin:
             self.__approx_len__ = 0
 
 
+class _ItemAccessMixin:
+    ITEM_ACCESS_ERROR: ClassVar[str | None] = None
+    BLOCK_NUMERIC_STRING_INDEX: ClassVar[bool] = False
+
+    def __getitem__(self, item: str) -> Any:
+        if self.ITEM_ACCESS_ERROR is not None:
+            if isinstance(item, int):
+                raise TypeError(self.ITEM_ACCESS_ERROR)
+            if self.BLOCK_NUMERIC_STRING_INDEX and isinstance(item, str) and item.isdigit():
+                raise TypeError(self.ITEM_ACCESS_ERROR)
+        return getattr(self, str(item))
+
+
+class _EmptyCollectionMixin:
+    def __iter__(self) -> Iterator[None]:
+        return iter(())
+
+    def __len__(self) -> int:
+        return 0
+
+
 class SimpleRollResult(_DirMixin):
     ATTRS: ClassVar[list[str]] = ["dice", "total", "full", "result", "raw"]
     METHODS: ClassVar[list[str]] = ["consolidated"]
@@ -56,10 +77,11 @@ class SimpleRollResult(_DirMixin):
 
 # === Context API ===
 @dataclass
-class GuildAPI(_DirMixin):
+class GuildAPI(_ItemAccessMixin, _EmptyCollectionMixin, _DirMixin):
     _data: Mapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["name", "id"]
     METHODS: ClassVar[list[str]] = ["servsettings"]
+    ITEM_ACCESS_ERROR: ClassVar[str | None] = "Guild attributes must be accessed by name (e.g., 'name', 'id')."
 
     @property
     def name(self) -> str:
@@ -73,20 +95,9 @@ class GuildAPI(_DirMixin):
     def servsettings(self) -> Mapping[str, Any] | None:
         return self._data.get("servsettings")
 
-    def __getitem__(self, item: str) -> Any:
-        if isinstance(item, int):
-            raise TypeError("CustomCounter indices must be strings (e.g., 'value', 'max').")
-        return getattr(self, str(item))
-
-    def __iter__(self):
-        return iter(())
-
-    def __len__(self) -> int:
-        return 0
-
 
 @dataclass
-class CategoryAPI(_DirMixin):
+class CategoryAPI(_ItemAccessMixin, _DirMixin):
     _data: Mapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["name", "id"]
     METHODS: ClassVar[list[str]] = []
@@ -100,12 +111,9 @@ class CategoryAPI(_DirMixin):
         raw = self._data.get("id")
         return int(raw) if raw is not None else None
 
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
-
 
 @dataclass
-class ChannelAPI(_DirMixin):
+class ChannelAPI(_ItemAccessMixin, _DirMixin):
     _data: Mapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["name", "id", "topic", "category", "parent"]
     METHODS: ClassVar[list[str]] = []
@@ -134,12 +142,9 @@ class ChannelAPI(_DirMixin):
         parent = self._data.get("parent")
         return ChannelAPI(parent) if parent is not None else None
 
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
-
 
 @dataclass
-class RoleAPI(_DirMixin):
+class RoleAPI(_ItemAccessMixin, _DirMixin):
     _data: Mapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["name", "id"]
     METHODS: ClassVar[list[str]] = []
@@ -153,12 +158,9 @@ class RoleAPI(_DirMixin):
         raw = self._data.get("id")
         return int(raw) if raw is not None else None
 
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
-
 
 @dataclass
-class AuthorAPI(_DirMixin):
+class AuthorAPI(_ItemAccessMixin, _DirMixin):
     _data: Mapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["name", "id", "discriminator", "display_name", "roles"]
     METHODS: ClassVar[list[str]] = ["get_roles"]
@@ -188,15 +190,12 @@ class AuthorAPI(_DirMixin):
     def roles(self) -> list[RoleAPI]:
         return self.get_roles()
 
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
-
     def __str__(self) -> str:
         return f"{self.name}#{self.discriminator}"
 
 
 @dataclass
-class AliasContextAPI(_DirMixin):
+class AliasContextAPI(_ItemAccessMixin, _DirMixin):
     _data: Mapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["guild", "channel", "author", "prefix", "alias", "message_id"]
     METHODS: ClassVar[list[str]] = []
@@ -239,9 +238,6 @@ class AliasContextAPI(_DirMixin):
 
     def __getattr__(self, item: str) -> Any:
         return self._data.get(item)
-
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
 
 
 # === StatBlock primitives ===
@@ -304,7 +300,7 @@ _SKILL_ABILITIES = {
 
 
 @dataclass
-class AliasBaseStats(_DirMixin):
+class AliasBaseStats(_ItemAccessMixin, _DirMixin):
     _data: Mapping[str, Any]
     prof_bonus_override: int | None = None
     ATTRS: ClassVar[list[str]] = [
@@ -379,9 +375,6 @@ class AliasBaseStats(_DirMixin):
         }
         return lookup.get(stat_lower, 10)
 
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
-
 
 @dataclass
 class AliasLevels(_DirMixin):
@@ -419,7 +412,7 @@ class AliasLevels(_DirMixin):
 
 
 @dataclass
-class AliasAttack(_DirMixin):
+class AliasAttack(_ItemAccessMixin, _DirMixin):
     _data: Mapping[str, Any]
     parent_statblock: Mapping[str, Any]
     ATTRS: ClassVar[list[str]] = ["name", "verb", "proper", "activation_type", "raw"]
@@ -453,9 +446,6 @@ class AliasAttack(_DirMixin):
         if damage:
             return f"{self.name}{verb}: {damage}"
         return f"{self.name}{verb}".strip()
-
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
 
 
 @dataclass
@@ -676,7 +666,7 @@ class AliasResistances(_DirMixin):
 
 
 @dataclass
-class AliasSpellbookSpell(_DirMixin):
+class AliasSpellbookSpell(_ItemAccessMixin, _DirMixin):
     _data: Mapping[str, Any]
     ATTRS: ClassVar[list[str]] = ["name", "dc", "sab", "mod", "prepared"]
     METHODS: ClassVar[list[str]] = []
@@ -703,9 +693,6 @@ class AliasSpellbookSpell(_DirMixin):
     @property
     def prepared(self) -> bool:
         return bool(self._data.get("prepared", True))
-
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
 
     def __str__(self) -> str:
         return self.name
@@ -834,7 +821,7 @@ class AliasSpellbook(_DirMixin):
 
 
 @dataclass
-class AliasCoinpurse(_DirMixin):
+class AliasCoinpurse(_ItemAccessMixin, _DirMixin):
     _data: MutableMapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["pp", "gp", "ep", "sp", "cp", "total"]
     METHODS: ClassVar[list[str]] = ["coin_str", "compact_str", "modify_coins", "set_coins", "autoconvert", "get_coins"]
@@ -843,9 +830,6 @@ class AliasCoinpurse(_DirMixin):
         if item in {"pp", "gp", "ep", "sp", "cp"}:
             return _safe_int(self._data.get(item), 0)
         return self._data.get(item)
-
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
 
     @property
     def total(self) -> float:
@@ -928,11 +912,15 @@ class AliasDeathSaves(_DirMixin):
 
 
 @dataclass
-class AliasAction(_DirMixin):
+class AliasAction(_ItemAccessMixin, _EmptyCollectionMixin, _DirMixin):
     _data: Mapping[str, Any]
     parent_statblock: Mapping[str, Any]
     ATTRS: ClassVar[list[str]] = ["name", "activation_type", "activation_type_name", "description", "snippet"]
     METHODS: ClassVar[list[str]] = []
+    ITEM_ACCESS_ERROR: ClassVar[str | None] = (
+        "AliasAction attributes must be accessed by name (e.g., 'name', 'activation_type')."
+    )
+    BLOCK_NUMERIC_STRING_INDEX: ClassVar[bool] = True
 
     @property
     def name(self) -> str:
@@ -964,20 +952,9 @@ class AliasAction(_DirMixin):
     def __str__(self) -> str:
         return f"**{self.name}**: {self.description}"
 
-    def __getitem__(self, item: str) -> Any:
-        if isinstance(item, int) or (isinstance(item, str) and item.isdigit()):
-            raise TypeError("AliasAction attributes must be accessed by name (e.g., 'name', 'activation_type').")
-        return getattr(self, str(item))
-
-    def __iter__(self):
-        return iter(())
-
-    def __len__(self) -> int:
-        return 0
-
 
 @dataclass
-class AliasCustomCounter(_DirMixin):
+class AliasCustomCounter(_ItemAccessMixin, _EmptyCollectionMixin, _DirMixin):
     _data: MutableMapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = [
         "name",
@@ -992,6 +969,8 @@ class AliasCustomCounter(_DirMixin):
         "reset_by",
     ]
     METHODS: ClassVar[list[str]] = ["mod", "set", "reset", "full_str"]
+    ITEM_ACCESS_ERROR: ClassVar[str | None] = "CustomCounter indices must be strings (e.g., 'value', 'max')."
+    BLOCK_NUMERIC_STRING_INDEX: ClassVar[bool] = True
 
     @property
     def name(self) -> str:
@@ -1072,21 +1051,10 @@ class AliasCustomCounter(_DirMixin):
     def __str__(self) -> str:
         return f"{self.value}/{self.max}"
 
-    def __getitem__(self, item: str) -> Any:
-        if isinstance(item, int) or (isinstance(item, str) and item.isdigit()):
-            raise TypeError("CustomCounter indices must be strings (e.g., 'value', 'max').")
-        return getattr(self, str(item))
-
-    def __iter__(self):
-        return iter(())
-
-    def __len__(self) -> int:
-        return 0
-
 
 # === StatBlock + Character ===
 @dataclass
-class AliasStatBlock(_DirMixin):
+class AliasStatBlock(_ItemAccessMixin, _EmptyCollectionMixin, _DirMixin):
     _data: MutableMapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = [
         "name",
@@ -1104,6 +1072,10 @@ class AliasStatBlock(_DirMixin):
         "creature_type",
     ]
     METHODS: ClassVar[list[str]] = ["set_hp", "modify_hp", "hp_str", "reset_hp", "set_temp_hp"]
+    ITEM_ACCESS_ERROR: ClassVar[str | None] = (
+        "AliasStatBlock attributes must be accessed by name (e.g., 'name', 'stats')."
+    )
+    BLOCK_NUMERIC_STRING_INDEX: ClassVar[bool] = True
 
     def _prof_bonus(self) -> int:
         stats = self._data.get("stats") or {}
@@ -1236,17 +1208,6 @@ class AliasStatBlock(_DirMixin):
 
     def __getattr__(self, item: str) -> Any:
         return self._data.get(item)
-
-    def __getitem__(self, item: str) -> Any:
-        if isinstance(item, int) or (isinstance(item, str) and item.isdigit()):
-            raise TypeError("AliasStatBlock attributes must be accessed by name (e.g., 'name', 'stats').")
-        return getattr(self, str(item))
-
-    def __iter__(self):
-        return iter(())
-
-    def __len__(self) -> int:
-        return 0
 
 
 @dataclass
@@ -1532,7 +1493,7 @@ MAX_COMBAT_METADATA_SIZE = 100000
 
 
 @dataclass
-class SimpleEffect(_DirMixin):
+class SimpleEffect(_ItemAccessMixin, _DirMixin):
     _data: MutableMapping[str, Any]
     ATTRS: ClassVar[list[str]] = [
         "name",
@@ -1607,9 +1568,6 @@ class SimpleEffect(_DirMixin):
         if not isinstance(parent, SimpleEffect):
             raise TypeError("Parent effect must be a SimpleEffect.")
         self._data["parent"] = parent._data
-
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
 
 
 @dataclass
@@ -1833,8 +1791,25 @@ class SimpleCombatant(AliasStatBlock):
                 pass
 
 
+def _find_named(items: Iterable[SimpleCombatant], name: str, strict: bool | None = None) -> SimpleCombatant | None:
+    needle = str(name).lower()
+    for item in items:
+        candidate = item.name.lower()
+        if strict is True and candidate == needle:
+            return item
+        if strict is None and candidate == needle:
+            return item
+        if strict is False and needle in candidate:
+            return item
+    if strict is None:
+        for item in items:
+            if needle in item.name.lower():
+                return item
+    return None
+
+
 @dataclass
-class SimpleGroup(_DirMixin):
+class SimpleGroup(_ItemAccessMixin, _DirMixin):
     _data: MutableMapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["combatants", "type", "init", "name", "id"]
     METHODS: ClassVar[list[str]] = ["get_combatant", "set_init"]
@@ -1871,29 +1846,14 @@ class SimpleGroup(_DirMixin):
 
     def get_combatant(self, name: str, strict: bool | None = None) -> SimpleCombatant | None:
         """Find a combatant within the group."""
-        name_lower = str(name).lower()
-        for combatant in self.combatants:
-            if strict is True and combatant.name.lower() == name_lower:
-                return combatant
-            if strict is None and combatant.name.lower() == name_lower:
-                return combatant
-            if strict is False and name_lower in combatant.name.lower():
-                return combatant
-        if strict is None:
-            for combatant in self.combatants:
-                if name_lower in combatant.name.lower():
-                    return combatant
-        return None
+        return _find_named(self.combatants, name, strict)
 
     def set_init(self, init: int) -> None:
         self._data["init"] = int(init)
 
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
-
 
 @dataclass
-class SimpleCombat(_DirMixin):
+class SimpleCombat(_ItemAccessMixin, _DirMixin):
     _data: MutableMapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["combatants", "groups", "me", "current", "name", "round_num", "turn_num", "metadata"]
     METHODS: ClassVar[list[str]] = ["get_combatant", "get_group", "set_metadata", "get_metadata", "delete_metadata", "set_round", "end_round"]
@@ -1918,11 +1878,12 @@ class SimpleCombat(_DirMixin):
     def current(self) -> SimpleCombatant | SimpleGroup | None:
         """Current turn holder (combatant or group)."""
         cur = self._data.get("current")
-        if cur is None:
+        if not isinstance(cur, Mapping):
             return None
+        current_data = dict(cur)
         if cur.get("type") == "group":
-            return SimpleGroup(cur)
-            return SimpleCombatant(cur)
+            return SimpleGroup(current_data)
+        return SimpleCombatant(current_data)
 
     @property
     def name(self) -> str | None:
@@ -1947,19 +1908,7 @@ class SimpleCombat(_DirMixin):
 
     def get_combatant(self, name: str, strict: bool | None = None) -> SimpleCombatant | None:
         """Find a combatant by name (strict, substring, or fuzzy)."""
-        name_lower = str(name).lower()
-        for combatant in self.combatants:
-            if strict is True and combatant.name.lower() == name_lower:
-                return combatant
-            if strict is None and combatant.name.lower() == name_lower:
-                return combatant
-            if strict is False and name_lower in combatant.name.lower():
-                return combatant
-        if strict is None:
-            for combatant in self.combatants:
-                if name_lower in combatant.name.lower():
-                    return combatant
-        return None
+        return _find_named(self.combatants, name, strict)
 
     def get_group(self, name: str, strict: bool | None = None) -> SimpleGroup | None:
         """Find a combatant group by name."""
@@ -2005,9 +1954,6 @@ class SimpleCombat(_DirMixin):
 
     def __getattr__(self, item: str) -> Any:
         return self._data.get(item)
-
-    def __getitem__(self, item: str) -> Any:
-        return getattr(self, str(item))
 
 
 # Backwards-compatible aliases for existing consumers
