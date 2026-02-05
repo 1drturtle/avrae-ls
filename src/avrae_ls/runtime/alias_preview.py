@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import re
-import shlex
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional, Tuple
 
 from avrae_ls.analysis.parser import DRACONIC_RE, INLINE_DRACONIC_RE, INLINE_ROLL_RE
+from avrae_ls.runtime import argparser as avrae_argparser
 from avrae_ls.runtime.runtime import ExecutionResult, MockExecutor, _roll_dice
 from avrae_ls.runtime.context import ContextData, GVarResolver
 from avrae_ls.runtime.argument_parsing import apply_argument_parsing
@@ -203,7 +203,7 @@ def validate_embed_payload(payload: str) -> Tuple[bool, str | None]:
 
 def parse_embed_payload(payload: str) -> EmbedPreview:
     """Parse an embed payload into a structured preview object."""
-    tokens = shlex.split(payload.strip())
+    tokens = avrae_argparser.argsplit(payload.strip())
     preview = EmbedPreview()
 
     i = 0
@@ -259,8 +259,8 @@ def _validate_embed_flags(text: str) -> Tuple[bool, str | None]:
         return False, "Embed payload is empty."
 
     try:
-        tokens = shlex.split(text)
-    except ValueError as exc:  # pragma: no cover - defensive only
+        tokens = avrae_argparser.argsplit(text)
+    except (avrae_argparser.BadArgument, avrae_argparser.ExpectedClosingQuoteError) as exc:
         return False, f"Embed payload could not be parsed: {exc}"
 
     flag_handlers = {

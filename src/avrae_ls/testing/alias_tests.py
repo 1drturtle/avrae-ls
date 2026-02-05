@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import re
-import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 import yaml
 
+from avrae_ls.runtime import argparser as avrae_argparser
 from avrae_ls.runtime.alias_preview import render_alias_command, simulate_command
 from avrae_ls.runtime.context import ContextBuilder
 from avrae_ls.runtime.runtime import MockExecutor
@@ -278,8 +278,8 @@ def diff_mismatched_parts(expected: Any, actual: Any) -> tuple[Any, Any] | None:
 
 def _split_command(command: str, path: Path) -> list[str]:
     try:
-        tokens = shlex.split(command, posix=True)
-    except ValueError as exc:
+        tokens = avrae_argparser.argsplit(command)
+    except (avrae_argparser.BadArgument, avrae_argparser.ExpectedClosingQuoteError) as exc:
         raise AliasTestError(f"{path} has an invalid command line: {exc}") from exc
     if not tokens:
         raise AliasTestError(f"{path} has an empty command")

@@ -93,6 +93,8 @@ def test_simulate_command_embeds_validate_unknown_keys():
     assert simulated.validation_error
     ok, err = validate_embed_payload(payload)
     assert not ok
+    assert err is not None
+
     assert "unknown flag" in err
 
 
@@ -106,18 +108,22 @@ def test_validate_embed_flag_style():
 def test_validate_embed_flag_unknown():
     ok, err = validate_embed_payload("-foo bar")
     assert not ok
+    assert err is not None
+
     assert "unknown flag" in err
 
 
 def test_validate_embed_flag_color():
     ok, err = validate_embed_payload("-color nothex")
     assert not ok
+    assert err is not None
     assert "color must be a 6-hex" in err
 
 
 def test_validate_embed_field_format():
     ok, err = validate_embed_payload('-f "BadField"')
     assert not ok
+    assert err is not None
     assert "field must be" in err.lower()
 
 
@@ -125,6 +131,26 @@ def test_validate_embed_color_placeholder():
     ok, err = validate_embed_payload("-color <color>")
     assert ok
     assert err is None
+
+
+def test_validate_embed_supports_avrae_quote_pairs():
+    payload = "-title \u201cHello World\u201d -desc \u00abFlavor text\u00bb -f \u300cName|Value|inline\u300d"
+    ok, err = validate_embed_payload(payload)
+    simulated = simulate_command(f"embed {payload}")
+
+    assert ok
+    assert err is None
+    assert simulated.embed is not None
+    assert simulated.embed.title == "Hello World"
+    assert simulated.embed.description == "Flavor text"
+    assert simulated.embed.fields and simulated.embed.fields[0].name == "Name"
+
+
+def test_validate_embed_reports_unclosed_quote_pairs():
+    ok, err = validate_embed_payload("-title \u201cHello")
+    assert not ok
+    assert err is not None
+    assert "Expected closing quote" in err
 
 
 def test_simulate_command_returns_embed_preview():
@@ -156,6 +182,8 @@ def test_simulate_command_with_embed_prefix_and_payload_on_newline():
     payload = "-title abc"
     simulated = simulate_command(f"embed\n{payload}")
     assert simulated.command_name == "embed"
+    assert simulated.preview is not None
+
     assert simulated.preview.strip() == payload
 
 
@@ -163,6 +191,8 @@ def test_simulate_command_finds_embed_after_intro_text():
     payload = "-title abc"
     simulated = simulate_command(f"# heading\nembed {payload}")
     assert simulated.command_name == "embed"
+    assert simulated.preview is not None
+
     assert simulated.preview.strip().endswith(payload)
 
 
@@ -170,12 +200,14 @@ def test_simulate_command_supports_multiple_flag_lines():
     payload = "-title abc\n-title def"
     simulated = simulate_command(payload)
     assert simulated.command_name == "embed"
+    assert simulated.preview is not None
     assert "-title abc" in simulated.preview
     assert "-title def" in simulated.preview
 
 
 def test_simulate_command_strips_alias_header():
-    alias = "!alias next embed\n-title \"Done?\""
+    alias = '!alias next embed\n-title "Done?"'
     simulated = simulate_command(alias)
     assert simulated.command_name == "embed"
+    assert simulated.preview is not None
     assert "Done?" in simulated.preview

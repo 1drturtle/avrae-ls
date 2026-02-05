@@ -4,6 +4,17 @@ from avrae_ls.runtime import argparser
 from avrae_ls.runtime.argparser import Argument, EphemeralArgument
 
 
+def test_argsplit_matches_avrae_style_quotes():
+    assert argparser.argsplit('foo bar "two words"') == ["foo", "bar", "two words"]
+    assert argparser.argsplit("-title \u201cHello World\u201d") == ["-title", "Hello World"]
+    assert argparser.argsplit("-desc \u00abFlavor\u00bb") == ["-desc", "Flavor"]
+
+
+def test_argsplit_unclosed_quote_raises():
+    with pytest.raises(argparser.ExpectedClosingQuoteError):
+        argparser.argsplit("-title \u201cHello")
+
+
 def test_argparse_arg_respects_ephemeral_flag():
     assert argparser._argparse_arg("d", None, True, 0, parse_ephem=True) == Argument("d", True, 0)
     assert argparser._argparse_arg("d", "1", True, 0, parse_ephem=True) == EphemeralArgument("d", True, 0, 1)

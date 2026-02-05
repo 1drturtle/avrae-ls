@@ -47,9 +47,10 @@ class StringView:
     def get(self):
         if self.eof:
             return None
-        ch = self.buffer[self.index]
         self.index += 1
-        return ch
+        if self.eof:
+            return None
+        return self.buffer[self.index]
 
     def undo(self):
         if self.index > 0:

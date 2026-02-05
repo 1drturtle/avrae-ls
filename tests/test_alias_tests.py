@@ -181,6 +181,16 @@ def test_parse_alias_test_requires_alias_file(tmp_path):
         parse_alias_tests(test_path)
 
 
+def test_parse_alias_tests_support_avrae_quote_pairs(tmp_path):
+    alias_path = tmp_path / "say.alias"
+    alias_path.write_text("!alias say echo %1%")
+    test_path = tmp_path / "test-say.alias-test"
+    test_path.write_text("!say \u201chello world\u201d\n---\n\"hello world\"\n")
+
+    case = parse_alias_tests(test_path)[0]
+    assert case.args == ["hello world"]
+
+
 @pytest.mark.asyncio
 async def test_alias_tests_support_regex_expected(tmp_path):
     alias_path = tmp_path / "greet.alias"
