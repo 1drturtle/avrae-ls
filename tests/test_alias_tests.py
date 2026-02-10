@@ -317,6 +317,31 @@ async def test_alias_tests_allow_metadata_character_override(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_alias_tests_character_override_makes_character_truthy(tmp_path):
+    alias_path = tmp_path / "haschar.alias"
+    alias_path.write_text(
+        "!alias haschar echo <drac2>\n"
+        "ch = character()\n"
+        "if not ch:\n"
+        "  return \"bad output\"\n"
+        "return \"good output\"\n"
+        "</drac2>"
+    )
+    test_path = tmp_path / "test-haschar.alias-test"
+    test_path.write_text("!haschar\n---\ngood output\n---\ncharacter:\n  name: Tester\n")
+
+    config = AvraeLSConfig.default(tmp_path)
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    case = parse_alias_tests(test_path)[0]
+    result = (await run_alias_tests([case], builder, executor))[0]
+
+    assert result.passed
+    assert result.actual == "good output"
+
+
+@pytest.mark.asyncio
 async def test_alias_tests_allow_metadata_vars_override(tmp_path):
     alias_path = tmp_path / "hp.alias"
     alias_path.write_text("!alias hp echo <drac2>return get('hp')</drac2>")

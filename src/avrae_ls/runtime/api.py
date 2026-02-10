@@ -53,6 +53,11 @@ class _EmptyCollectionMixin:
     def __len__(self) -> int:
         return 0
 
+    def __bool__(self) -> bool:
+        # These API wrappers are objects, not containers. They may intentionally present
+        # as empty iterables to draconic (for safety), but should still be truthy.
+        return True
+
 
 class SimpleRollResult(_DirMixin):
     ATTRS: ClassVar[list[str]] = ["dice", "total", "full", "result", "raw"]
