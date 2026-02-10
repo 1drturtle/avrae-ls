@@ -59,32 +59,84 @@ async def test_fetches_gvar_when_enabled(tmp_path):
     [
         pytest.param("echo <drac2></drac2>", "echo ", [], None, None, id="empty_inline_block"),
         pytest.param('!alias echo <drac2> return "s"\n</drac2>', "s", [], None, None, id="inline_return_alias"),
-        pytest.param("!alias inline echo prefix <drac2>bad_var</drac2> suffix", None, ["undefined"], None, None, id="inline_bad_var"),
-        pytest.param("using(mod='mod')\nmod.answer", None, [], {"mod": "answer = 'ok'"}, None, id="using_imported_name"),
-        pytest.param('!alias next embed \n-title "Are you done?"', "embed \n-title \"Are you done?\"", [], None, None, id="plain_embed_flags"),
+        pytest.param(
+            "!alias inline echo prefix <drac2>bad_var</drac2> suffix",
+            None,
+            ["undefined"],
+            None,
+            None,
+            id="inline_bad_var",
+        ),
+        pytest.param(
+            "using(mod='mod')\nmod.answer", None, [], {"mod": "answer = 'ok'"}, None, id="using_imported_name"
+        ),
+        pytest.param(
+            '!alias next embed \n-title "Are you done?"',
+            'embed \n-title "Are you done?"',
+            [],
+            None,
+            None,
+            id="plain_embed_flags",
+        ),
         pytest.param("for x in range(3):\n    y = x\nprint(x)", None, [], None, None, id="for_loop_binds_target"),
-        pytest.param("!alias aaa echo \n<drac2>\nfor i in range(3):\n  return i\n\n</drac2>", "echo \n0", [], None, None, id="drac_loop_return"),
-        pytest.param("!alias hello echo\n<drac2>\nx = 3\nreturn x\n</drac2>", "echo\n3", [], None, None, id="drac_simple_return"),
+        pytest.param(
+            "!alias aaa echo \n<drac2>\nfor i in range(3):\n  return i\n\n</drac2>",
+            "echo \n0",
+            [],
+            None,
+            None,
+            id="drac_loop_return",
+        ),
+        pytest.param(
+            "!alias hello echo\n<drac2>\nx = 3\nreturn x\n</drac2>", "echo\n3", [], None, None, id="drac_simple_return"
+        ),
         pytest.param("len(1, 2)", None, ["invalid arguments"], None, None, id="bad_args"),
         pytest.param("import os\nx=1", None, ["Imports are not supported"], None, None, id="imports_not_supported"),
         pytest.param("x + 1", None, ["undefined"], None, None, id="unknown_name"),
-        pytest.param("def inner():\n    y = 1\ninner()\ny", None, ["undefined"], None, None, id="function_scope_not_global"),
+        pytest.param(
+            "def inner():\n    y = 1\ninner()\ny", None, ["undefined"], None, None, id="function_scope_not_global"
+        ),
         pytest.param("get_gvar('abc')", None, ["gvar"], None, None, id="unknown_gvar"),
-        pytest.param("class X:\n    def _hidden(self):\n        return 1\n\nX()._hidden()", None, ["private methods"], None, None, id="private_method_call"),
-        pytest.param("x = roll('1d1')\ny = vroll('1d1')\nx + y.total", None, [], None, None, id="roll_and_vroll_available"),
+        pytest.param(
+            "class X:\n    def _hidden(self):\n        return 1\n\nX()._hidden()",
+            None,
+            ["private methods"],
+            None,
+            None,
+            id="private_method_call",
+        ),
+        pytest.param(
+            "x = roll('1d1')\ny = vroll('1d1')\nx + y.total", None, [], None, None, id="roll_and_vroll_available"
+        ),
         pytest.param("character().hp", None, ["character context"], None, None, id="character_context_missing"),
         pytest.param("combat().round_num", None, ["combat context"], None, None, id="combat_context_missing"),
         pytest.param("character.hp", None, ["Call character()"], None, None, id="character_not_called"),
-        pytest.param("combat().combatants.hp", None, ["index or iterate"], None, {"combat": {"combatants": []}}, id="iterable_attribute_chain"),
+        pytest.param(
+            "combat().combatants.hp",
+            None,
+            ["index or iterate"],
+            None,
+            {"combat": {"combatants": []}},
+            id="iterable_attribute_chain",
+        ),
         pytest.param("ctx.author()", None, ["property"], None, None, id="calling_property"),
-        pytest.param("!alias inline echo prefix {{bad_var}} suffix", None, ["undefined"], None, None, id="inline_expression_bad_var"),
+        pytest.param(
+            "!alias inline echo prefix {{bad_var}} suffix",
+            None,
+            ["undefined"],
+            None,
+            None,
+            id="inline_expression_bad_var",
+        ),
         pytest.param("!alias roll echo rolled {1}", "echo rolled 1", [], None, None, id="inline_roll_replaced"),
         pytest.param("[x for x in range(3)]", None, [], None, None, id="list_comprehension_scopes_target"),
         pytest.param("get_cvar", None, ["undefined"], None, None, id="bare_get_cvar_not_allowed"),
     ],
 )
 @pytest.mark.asyncio
-async def test_diagnostic_matrix(tmp_path, alias_text: str, expected_command, expected_messages, resolver_seed, ctx_kwargs):
+async def test_diagnostic_matrix(
+    tmp_path, alias_text: str, expected_command, expected_messages, resolver_seed, ctx_kwargs
+):
     provider = _provider()
     resolver = _resolver(tmp_path)
     if resolver_seed:

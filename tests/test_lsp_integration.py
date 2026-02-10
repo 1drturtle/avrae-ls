@@ -10,7 +10,9 @@ def _server_with_doc(source: str, uri: str = "file:///integration.alias") -> Avr
     server = AvraeLanguageServer()
     server.load_workspace(Path("."))
     server.protocol._workspace = Workspace(None, sync_kind=types.TextDocumentSyncKind.Incremental)
-    server.protocol.workspace.put_text_document(types.TextDocumentItem(uri=uri, language_id="avrae", version=1, text=source))
+    server.protocol.workspace.put_text_document(
+        types.TextDocumentItem(uri=uri, language_id="avrae", version=1, text=source)
+    )
     return server
 
 

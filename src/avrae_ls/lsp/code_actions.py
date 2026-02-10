@@ -148,7 +148,7 @@ def _rewrite_import_action(
     module: str | None,
 ) -> types.CodeAction:
     target = module or "module"
-    replacement = f"using({target}=\"<gvar-id>\")"
+    replacement = f'using({target}="<gvar-id>")'
     edit = types.TextEdit(range=diag.range, new_text=replacement)
     return types.CodeAction(
         title="Replace import with using()",

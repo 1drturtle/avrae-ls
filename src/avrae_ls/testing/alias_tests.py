@@ -304,6 +304,7 @@ def _resolve_alias_path(path: Path, alias_name: str) -> Path:
         f"Could not find alias file for '{alias_name}'. Checked: {', '.join(str(base_dir / c) for c in candidates)}"
     )
 
+
 def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     merged = dict(base or {})
     for key, val in (override or {}).items():

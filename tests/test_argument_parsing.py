@@ -6,6 +6,6 @@ def test_argument_parsing_replacements():
     rendered = apply_argument_parsing(text, ["first arg", "second"])
     assert '"first arg"' in rendered  # %1% gets quoted for spaces
     assert "first arg second" in rendered  # %*% preserved order
-    assert "[\'first arg\', \'second\']" in rendered or "[\"first arg\", \"second\"]" in rendered
+    assert "['first arg', 'second']" in rendered or '["first arg", "second"]' in rendered
     assert "&1&" not in rendered
     assert "&ARGS&" not in rendered

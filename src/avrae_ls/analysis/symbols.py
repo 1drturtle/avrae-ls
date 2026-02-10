@@ -87,9 +87,7 @@ def find_references(
         ranges.extend(_references_from_code(source_ctx.prepared, name, 0, 0, include_stores))
     else:
         for block in source_ctx.blocks:
-            ranges.extend(
-                _references_from_code(block.code, name, block.line_offset, block.char_offset, include_stores)
-            )
+            ranges.extend(_references_from_code(block.code, name, block.line_offset, block.char_offset, include_stores))
     return _dedupe_ranges(ranges)
 
 

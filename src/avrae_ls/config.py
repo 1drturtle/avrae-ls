@@ -238,7 +238,12 @@ class AvraeLSConfig:
             ],
             "skills": skills,
             "saves": saves,
-            "resistances": {"resist": [{"dtype": "fire", "unless": [], "only": []}], "vuln": [], "immune": [], "neutral": []},
+            "resistances": {
+                "resist": [{"dtype": "fire", "unless": [], "only": []}],
+                "vuln": [],
+                "immune": [],
+                "neutral": [],
+            },
             "spellbook": spellbook,
             "consumables": consumables,
             "cvars": {"favorite_enemy": "goblinoids", "fighting_style": "defense"},
@@ -303,13 +308,29 @@ class AvraeLSConfig:
             "type": "combatant",
             "note": "",
             "effects": [],
-            "stats": {"strength": 8, "dexterity": 14, "constitution": 10, "intelligence": 8, "wisdom": 10, "charisma": 8, "prof_bonus": 2},
+            "stats": {
+                "strength": 8,
+                "dexterity": 14,
+                "constitution": 10,
+                "intelligence": 8,
+                "wisdom": 10,
+                "charisma": 8,
+                "prof_bonus": 2,
+            },
             "levels": {},
             "skills": {"stealth": {"value": 6, "prof": 1, "bonus": 0, "adv": None}},
             "saves": {"dex": 4},
             "resistances": {"resist": [], "vuln": [], "immune": [], "neutral": []},
             "spellbook": {"spells": []},
-            "attacks": [{"name": "Scimitar", "verb": "slashes", "proper": False, "activation_type": 1, "raw": {"name": "Scimitar", "bonus": "+4", "damage": "1d6+2 slashing"}}],
+            "attacks": [
+                {
+                    "name": "Scimitar",
+                    "verb": "slashes",
+                    "proper": False,
+                    "activation_type": 1,
+                    "raw": {"name": "Scimitar", "bonus": "+4", "damage": "1d6+2 slashing"},
+                }
+            ],
             "max_hp": 11,
             "hp": 11,
             "temp_hp": 0,
@@ -370,6 +391,7 @@ def _expand_env_vars(data: Any, env: Mapping[str, str], missing_vars: set[str]) 
     if isinstance(data, list):
         return [_expand_env_vars(value, env, missing_vars) for value in data]
     if isinstance(data, str):
+
         def _replace(match: re.Match[str]) -> str:
             var = match.group(1) or match.group(2) or ""
             if var in env:
@@ -388,7 +410,9 @@ def _coerce_optional_str(value: Any) -> str | None:
     return value_str if value_str.strip() else None
 
 
-def load_config(workspace_root: Path, *, default_enable_gvar_fetch: bool = False) -> Tuple[AvraeLSConfig, Iterable[str]]:
+def load_config(
+    workspace_root: Path, *, default_enable_gvar_fetch: bool = False
+) -> Tuple[AvraeLSConfig, Iterable[str]]:
     """Load `.avraels.json` from the workspace root, returning config and warnings."""
     path = workspace_root / CONFIG_FILENAME
     if not path.exists():
@@ -448,9 +472,7 @@ def load_config(workspace_root: Path, *, default_enable_gvar_fetch: bool = False
 
     default_profile = str(raw.get("defaultProfile") or "default")
     if default_profile not in profiles and profiles:
-        warnings.append(
-            f"defaultProfile '{default_profile}' not found; falling back to first profile in file."
-        )
+        warnings.append(f"defaultProfile '{default_profile}' not found; falling back to first profile in file.")
         default_profile = next(iter(profiles))
 
     if not profiles:

@@ -202,9 +202,7 @@ def test_context_builder_loads_gvar_from_file_path(tmp_path: Path):
     gvar_file_alt.write_text("answer = 84\n")
 
     var_file = var_dir / "gvars.json"
-    var_file.write_text(
-        json.dumps({"gvars": {"mod123": {"filePath": "mod.gvar"}, "mod456": {"path": "mod-alt.gvar"}}})
-    )
+    var_file.write_text(json.dumps({"gvars": {"mod123": {"filePath": "mod.gvar"}, "mod456": {"path": "mod-alt.gvar"}}}))
 
     cfg = AvraeLSConfig.default(tmp_path)
     cfg.var_files = (var_file,)

@@ -15,7 +15,15 @@ def test_var_sources_scope_order():
 def test_derive_character_cvars_matches_table():
     character = {
         "name": "Ally",
-        "stats": {"strength": 15, "dexterity": 12, "constitution": 8, "intelligence": 10, "wisdom": 13, "charisma": 9, "prof_bonus": 3},
+        "stats": {
+            "strength": 15,
+            "dexterity": 12,
+            "constitution": 8,
+            "intelligence": 10,
+            "wisdom": 13,
+            "charisma": 9,
+            "prof_bonus": 3,
+        },
         "saves": {"str": 5, "dex": 3, "con": 1, "int": 0, "wis": 4, "cha": 2},
         "levels": {"Fighter": 2, "Wizard": 1},
         "ac": 17,

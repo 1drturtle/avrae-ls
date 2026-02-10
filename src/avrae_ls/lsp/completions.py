@@ -141,7 +141,9 @@ def completion_items_for_position(
     return items
 
 
-def _attribute_completions(receiver: str, prefix: str, code: str, type_map: Dict[str, str] | None = None) -> List[types.CompletionItem]:
+def _attribute_completions(
+    receiver: str, prefix: str, code: str, type_map: Dict[str, str] | None = None
+) -> List[types.CompletionItem]:
     items: list[types.CompletionItem] = []
     type_key = resolve_type_name(receiver, code, type_map)
     if IDENT_RE.fullmatch(receiver) and (not type_map or receiver not in type_map) and type_key == receiver:
@@ -384,7 +386,9 @@ def _function_locals_at_node(
     return names
 
 
-def _attribute_receiver_and_prefix(code: str, line: int, character: int, capture_full_token: bool = False) -> Optional[tuple[str, str]]:
+def _attribute_receiver_and_prefix(
+    code: str, line: int, character: int, capture_full_token: bool = False
+) -> Optional[tuple[str, str]]:
     lines = code.splitlines()
     if line >= len(lines):
         return None
@@ -393,7 +397,7 @@ def _attribute_receiver_and_prefix(code: str, line: int, character: int, capture
     if capture_full_token:
         while end < len(line_text) and (line_text[end].isalnum() or line_text[end] == "_"):
             end += 1
-    line_text = line_text[: end]
+    line_text = line_text[:end]
     dot = line_text.rfind(".")
     if dot == -1:
         return None

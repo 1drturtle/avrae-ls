@@ -70,6 +70,7 @@ async def test_mock_executor_runs_code(tmp_path):
     assert result.value == 3
     assert result.stdout == ""
 
+
 @pytest.mark.asyncio
 async def test_mock_executor_resolves_gvars(tmp_path):
     executor = MockExecutor()
@@ -147,7 +148,12 @@ async def test_actions_list_safe(tmp_path):
     ctx = ContextData(
         character={
             "actions": [
-                {"name": "Second Wind", "activation_type": 3, "activation_type_name": "BONUS_ACTION", "description": "+1d10+5"}
+                {
+                    "name": "Second Wind",
+                    "activation_type": 3,
+                    "activation_type_name": "BONUS_ACTION",
+                    "description": "+1d10+5",
+                }
             ]
         },
         vars=VarSources(),
@@ -165,7 +171,14 @@ async def test_character_attributes_accessible(tmp_path):
     ctx = ContextData(
         character={
             "name": "A",
-            "stats": {"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            "stats": {
+                "strength": 10,
+                "dexterity": 10,
+                "constitution": 10,
+                "intelligence": 10,
+                "wisdom": 10,
+                "charisma": 10,
+            },
             "levels": {"Fighter": 1},
             "attacks": [{"name": "Punch"}],
             "skills": {"athletics": {"value": 2}},
@@ -698,6 +711,7 @@ async def test_load_yaml_accepts_json_input(tmp_path):
 
     assert result.error is None
     assert result.value == [1, 2, 3]
+
 
 def test_documented_builtins_present():
     executor = MockExecutor()

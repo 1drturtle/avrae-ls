@@ -83,16 +83,12 @@ class DiagnosticProvider:
             diagnostics.append(_syntax_from_std(exc))
             return diagnostics
 
-        diagnostics.extend(
-            self._check_unknown_names(body, ctx_data, self._settings.semantic_level)
-        )
+        diagnostics.extend(self._check_unknown_names(body, ctx_data, self._settings.semantic_level))
         diagnostics.extend(await _check_gvars(body, gvar_resolver, self._settings))
         diagnostics.extend(_check_imports(body, self._settings.semantic_level))
         diagnostics.extend(_check_call_args(body, self._builtin_signatures, self._settings.semantic_level))
         diagnostics.extend(_check_private_method_calls(body))
-        diagnostics.extend(
-            _check_api_misuse(body, code, ctx_data, self._settings.semantic_level)
-        )
+        diagnostics.extend(_check_api_misuse(body, code, ctx_data, self._settings.semantic_level))
         if line_shift:
             diagnostics = _shift_diagnostics(diagnostics, line_shift, 0)
         return diagnostics
@@ -460,7 +456,11 @@ def _uncalled_context_attr_diagnostics(
     assigned_names: Set[str],
     severity_level: str,
 ) -> List[types.Diagnostic]:
-    if isinstance(node.value, ast.Name) and node.value.id in {"character", "combat"} and node.value.id not in assigned_names:
+    if (
+        isinstance(node.value, ast.Name)
+        and node.value.id in {"character", "combat"}
+        and node.value.id not in assigned_names
+    ):
         call_hint = f"{node.value.id}()"
         return [
             _make_diagnostic(
@@ -599,7 +599,7 @@ def _make_diagnostic(
         rng = types.Range(
             start=types.Position(line=0, character=0),
             end=types.Position(line=0, character=1),
-    )
+        )
     return types.Diagnostic(
         message=message,
         range=rng,
@@ -627,8 +627,6 @@ def _shift_diagnostics(diags: List[types.Diagnostic], line_offset: int, char_off
             )
         )
     return shifted
-
-
 
 
 def _build_builtin_signatures() -> dict[str, inspect.Signature]:

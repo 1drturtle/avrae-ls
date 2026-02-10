@@ -152,7 +152,7 @@ async def render_alias_command(
     for kind, match in matches:
         if match.start() < pos:
             continue
-        parts.append(body[pos: match.start()])
+        parts.append(body[pos : match.start()])
 
         if kind in {"block", "inline"}:
             code = match.group(1)
@@ -304,7 +304,7 @@ def _validate_field_arg(value: str | None) -> Tuple[bool, str | None, int]:
     assert value is not None  # for type checker
     parts = value.split("|")
     if len(parts) < 2 or len(parts) > 3:
-        return False, "Embed field must be in the form \"Title|Text[|inline]\".", consumed
+        return False, 'Embed field must be in the form "Title|Text[|inline]".', consumed
     if not parts[0] or not parts[1]:
         return False, "Embed field title and text cannot be empty.", consumed
     if len(parts) == 3 and parts[2].lower() not in ("inline", ""):

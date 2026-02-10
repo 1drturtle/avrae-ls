@@ -120,7 +120,7 @@ def test_run_tests_output_uses_rendered_command(tmp_path, capsys):
 def test_run_tests_output_skips_diff_on_execution_error(tmp_path, capsys):
     (tmp_path / ".avraels.json").write_text('{"enableGvarFetch": false}')
     alias_path = tmp_path / "boom.alias"
-    alias_path.write_text("!alias boom echo\n<drac2>\nload_json(\"\")\n</drac2>\n")
+    alias_path.write_text('!alias boom echo\n<drac2>\nload_json("")\n</drac2>\n')
     test_path = tmp_path / "test-boom.alias-test"
     test_path.write_text("!boom\n---\nshould not compare\n")
 
@@ -185,7 +185,7 @@ def test_parse_alias_tests_support_avrae_quote_pairs(tmp_path):
     alias_path = tmp_path / "say.alias"
     alias_path.write_text("!alias say echo %1%")
     test_path = tmp_path / "test-say.alias-test"
-    test_path.write_text("!say \u201chello world\u201d\n---\n\"hello world\"\n")
+    test_path.write_text('!say \u201chello world\u201d\n---\n"hello world"\n')
 
     case = parse_alias_tests(test_path)[0]
     assert case.args == ["hello world"]

@@ -146,7 +146,9 @@ def _avrae_function_sigs() -> Dict[str, FunctionSig]:
     return sigs
 
 
-def signature_help_for_code(code: str, line: int, character: int, sigs: Dict[str, FunctionSig]) -> Optional[types.SignatureHelp]:
+def signature_help_for_code(
+    code: str, line: int, character: int, sigs: Dict[str, FunctionSig]
+) -> Optional[types.SignatureHelp]:
     try:
         tree = ast.parse(code)
     except SyntaxError:

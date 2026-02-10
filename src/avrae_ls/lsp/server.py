@@ -22,7 +22,13 @@ from avrae_ls.analysis.source_context import build_source_context, code_for_posi
 from avrae_ls.lsp.signature_help import load_signatures, signature_help_for_code
 from avrae_ls.lsp.completions import gather_suggestions, completion_items_for_position, hover_for_position
 from avrae_ls.lsp.code_actions import code_actions_for_document
-from avrae_ls.analysis.symbols import build_symbol_table, document_symbols, find_definition_range, find_references, range_for_word
+from avrae_ls.analysis.symbols import (
+    build_symbol_table,
+    document_symbols,
+    find_definition_range,
+    find_references,
+    range_for_word,
+)
 
 # Prefer package metadata so the server version matches the installed wheel.
 try:
@@ -106,9 +112,7 @@ def on_initialize(server: AvraeLanguageServer, params: types.InitializeParams):
 @ls.feature(types.INITIALIZED)
 async def on_initialized(server: AvraeLanguageServer, params: types.InitializedParams):
     for warning in server.state.warnings:
-        server.window_log_message(
-            types.LogMessageParams(type=types.MessageType.Warning, message=warning)
-        )
+        server.window_log_message(types.LogMessageParams(type=types.MessageType.Warning, message=warning))
 
 
 @ls.feature(types.TEXT_DOCUMENT_DID_OPEN)
@@ -130,9 +134,7 @@ async def did_save(server: AvraeLanguageServer, params: types.DidSaveTextDocumen
 async def did_change_config(server: AvraeLanguageServer, params: types.DidChangeConfigurationParams):
     server.load_workspace(server.workspace_root)
     for warning in server.state.warnings:
-        server.window_log_message(
-            types.LogMessageParams(type=types.MessageType.Warning, message=warning)
-        )
+        server.window_log_message(types.LogMessageParams(type=types.MessageType.Warning, message=warning))
 
 
 @ls.feature(types.TEXT_DOCUMENT_DOCUMENT_SYMBOL)
@@ -336,9 +338,7 @@ async def run_alias(server: AvraeLanguageServer, *args: Any):
         if rendered.error:
             src = doc.source if doc else text
             extra.append(
-                _runtime_diagnostic_with_source(
-                    rendered.error, server.state.config.diagnostics.runtime_level, src
-                )
+                _runtime_diagnostic_with_source(rendered.error, server.state.config.diagnostics.runtime_level, src)
             )
         await _publish_diagnostics(server, uri, profile=profile, extra=extra)
     return response
@@ -393,6 +393,7 @@ def _format_runtime_error(error: BaseException) -> str:
         return error.msg
     return str(error)
 
+
 def _runtime_diagnostic_with_source(error: BaseException, level: str, source: str | None) -> types.Diagnostic:
     severity = LEVEL_TO_SEVERITY.get(level.lower(), types.DiagnosticSeverity.Error)
     if source and hasattr(error, "module"):
@@ -411,7 +412,9 @@ def _runtime_diagnostic_with_source(error: BaseException, level: str, source: st
     elif hasattr(error, "node"):
         node = getattr(error, "node")
         rng = types.Range(
-            start=types.Position(line=max(getattr(node, "lineno", 1) - 1, 0), character=max(getattr(node, "col_offset", 0), 0)),
+            start=types.Position(
+                line=max(getattr(node, "lineno", 1) - 1, 0), character=max(getattr(node, "col_offset", 0), 0)
+            ),
             end=types.Position(
                 line=max(getattr(node, "end_lineno", getattr(node, "lineno", 1)) - 1, 0),
                 character=max(getattr(node, "end_col_offset", getattr(node, "col_offset", 0) + 1), 0),

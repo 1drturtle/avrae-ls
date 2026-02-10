@@ -50,7 +50,7 @@ def test_gvar_using_stub_quick_fix():
     params = _params(diag.range, [diag])
     actions = code_actions_for_document("get_gvar('abc-123')\n", params, Path("."))
     edits = [edit for action in actions for edit in (action.edit.changes or {}).get("file://test", [])]
-    assert any("using(abc_123=\"abc-123\")" in edit.new_text for edit in edits)
+    assert any('using(abc_123="abc-123")' in edit.new_text for edit in edits)
 
 
 def test_import_rewrite_quick_fix():
@@ -108,9 +108,7 @@ async def test_code_action_round_trip_plain_text_stub_inserted_at_top():
     uri = "file:///plain.alias"
     server = _setup_server_with_doc(source, uri)
     ctx_data = server.state.context_builder.build()
-    diags = await server.state.diagnostics.analyze(
-        source, ctx_data, server.state.context_builder.gvar_resolver
-    )
+    diags = await server.state.diagnostics.analyze(source, ctx_data, server.state.context_builder.gvar_resolver)
     diag = next(d for d in diags if d.code == UNDEFINED_NAME_CODE)
     params = types.CodeActionParams(
         text_document=types.TextDocumentIdentifier(uri=uri),
@@ -137,9 +135,7 @@ async def test_code_action_round_trip_draconic_block_respects_offsets():
     uri = "file:///drac.alias"
     server = _setup_server_with_doc(source, uri)
     ctx_data = server.state.context_builder.build()
-    diags = await server.state.diagnostics.analyze(
-        source, ctx_data, server.state.context_builder.gvar_resolver
-    )
+    diags = await server.state.diagnostics.analyze(source, ctx_data, server.state.context_builder.gvar_resolver)
     diag = next(d for d in diags if d.code == UNDEFINED_NAME_CODE)
     params = types.CodeActionParams(
         text_document=types.TextDocumentIdentifier(uri=uri),

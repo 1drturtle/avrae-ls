@@ -338,7 +338,6 @@ class GVarResolver:
         return self._handle_gvar_response(key, resp, blocking=False)
 
 
-
 def _read_json_file(path: Path) -> Dict[str, Any] | None:
     try:
         text = path.read_text()

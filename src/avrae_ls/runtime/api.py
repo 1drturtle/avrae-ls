@@ -1352,7 +1352,9 @@ class CharacterAPI(AliasStatBlock):
         """Minimum value for a custom counter."""
         return self.cc(name).min
 
-    def set_cc(self, name: str, value: int | None = None, maximum: int | None = None, minimum: int | None = None) -> int:
+    def set_cc(
+        self, name: str, value: int | None = None, maximum: int | None = None, minimum: int | None = None
+    ) -> int:
         """Set value/max/min for a custom counter."""
         con = self._consumable_map().setdefault(str(name), {"name": str(name)})
         if value is not None:
@@ -1697,7 +1699,11 @@ class SimpleCombatant(AliasStatBlock):
         except Exception:
             roll_result = d20.roll("0")
         label = "Damage (CRIT!)" if crit else "Damage"
-        return {"damage": f"**{label}**: {roll_result}", "total": roll_result.total, "roll": SimpleRollResult(roll_result)}
+        return {
+            "damage": f"**{label}**: {roll_result}",
+            "total": roll_result.total,
+            "roll": SimpleRollResult(roll_result),
+        }
 
     def set_ac(self, ac: int) -> None:
         """Set armor class."""
@@ -1856,7 +1862,15 @@ class SimpleGroup(_ItemAccessMixin, _DirMixin):
 class SimpleCombat(_ItemAccessMixin, _DirMixin):
     _data: MutableMapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = ["combatants", "groups", "me", "current", "name", "round_num", "turn_num", "metadata"]
-    METHODS: ClassVar[list[str]] = ["get_combatant", "get_group", "set_metadata", "get_metadata", "delete_metadata", "set_round", "end_round"]
+    METHODS: ClassVar[list[str]] = [
+        "get_combatant",
+        "get_group",
+        "set_metadata",
+        "get_metadata",
+        "delete_metadata",
+        "set_round",
+        "end_round",
+    ]
 
     @property
     def combatants(self) -> list[SimpleCombatant]:

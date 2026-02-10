@@ -52,12 +52,14 @@ def test_nested_attributes_completion():
     labels = {item.label for item in items}
     assert len(labels) != 0
 
+
 def test_completions_attributes_correct():
     code = "x = character()."
     items = completion_items_for_position(code, line=0, character=len(code), suggestions=[])
     labels = {item.label for item in items}
     assert "name" in labels
     assert "argparse" not in labels
+
 
 def test_completions_attributes_correct_complex():
     code = "x = {'a': character()}\ny = x.get('a')."
@@ -198,7 +200,9 @@ def test_attribute_completion_inside_call_does_not_use_builtin_suggestions():
             "x.append(y[0].)",
         ]
     )
-    items_idx = completion_items_for_position(code_indexed, line=2, character=len("x.append(y[0]."), suggestions=suggestions)
+    items_idx = completion_items_for_position(
+        code_indexed, line=2, character=len("x.append(y[0]."), suggestions=suggestions
+    )
     labels_idx = {item.label for item in items_idx}
     assert "name" in labels_idx
     assert "abs" not in labels_idx
@@ -331,7 +335,9 @@ def test_parameter_annotation_infers_type():
     ctx_data = ContextData()
     resolver = GVarResolver(cfg)
     hover_code = 'def use_roll(res: "SimpleRollResult"):\n    res'
-    hover = hover_for_position(hover_code, line=1, character=len("    res"), sigs={}, ctx_data=ctx_data, resolver=resolver)
+    hover = hover_for_position(
+        hover_code, line=1, character=len("    res"), sigs={}, ctx_data=ctx_data, resolver=resolver
+    )
     assert hover is not None
     assert "SimpleRollResult" in hover.contents.value
 
@@ -415,11 +421,15 @@ def test_safe_methods_evaluated_for_constant_bindings():
     resolver = builder.gvar_resolver
 
     resist_code = "val = character().resistances.is_resistant('fire')\nval"
-    resist_hover = hover_for_position(resist_code, line=1, character=len("val"), sigs={}, ctx_data=ctx_data, resolver=resolver)
+    resist_hover = hover_for_position(
+        resist_code, line=1, character=len("val"), sigs={}, ctx_data=ctx_data, resolver=resolver
+    )
     assert resist_hover is not None
     assert "bool" in resist_hover.contents.value
 
     slots_code = "slots = character().spellbook.get_slots(1)\nslots"
-    slots_hover = hover_for_position(slots_code, line=1, character=len("slots"), sigs={}, ctx_data=ctx_data, resolver=resolver)
+    slots_hover = hover_for_position(
+        slots_code, line=1, character=len("slots"), sigs={}, ctx_data=ctx_data, resolver=resolver
+    )
     assert slots_hover is not None
     assert "int" in slots_hover.contents.value

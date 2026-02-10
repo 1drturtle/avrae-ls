@@ -170,7 +170,7 @@ def test_hover_inside_if():
     ctx_data = ContextData()
     resolver = GVarResolver(AvraeLSConfig.default(Path(".")))
     code = "for i in range(3):\n    x = 7\n    x"
-    hover = hover_for_position(code, 2, len('    x'), {}, ctx_data, resolver)
+    hover = hover_for_position(code, 2, len("    x"), {}, ctx_data, resolver)
     assert hover is not None
     text = hover.contents.value
     assert "7" in text

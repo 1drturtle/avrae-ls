@@ -26,6 +26,8 @@ from avrae_ls.runtime import argparser as avrae_argparser
 
 _VERIFY_SIGNATURE_TIMEOUT = 5.0
 _VERIFY_SIGNATURE_RETRIES = 0
+
+
 # Minimal stand-in for Avrae's AliasException
 class AliasException(Exception):
     def __init__(self, msg, pm_user):
@@ -36,9 +38,11 @@ class AliasException(Exception):
 try:
     from avrae.aliasing.errors import FunctionRequiresCharacter  # type: ignore
 except Exception:  # pragma: no cover - fallback when avrae is unavailable
+
     class FunctionRequiresCharacter(Exception):
         def __init__(self, msg: str | None = None):
             super().__init__(msg or "This alias requires an active character.")
+
 
 log = logging.getLogger(__name__)
 
@@ -97,6 +101,7 @@ def _load_yaml(data: Any) -> Any:
 
 def _yaml_dumper():
     """Create a dumper that knows how to serialize draconic SafeList/SafeDict/SafeSet."""
+
     class DraconicDumper(yaml.SafeDumper):
         pass
 
@@ -146,6 +151,7 @@ def _vroll_dice(dice: str, multiply: int = 1, add: int = 0) -> SimpleRollResult 
         return None
 
     if multiply != 1 or add != 0:
+
         def _scale(node):
             if isinstance(node, d20.ast.Dice):
                 node.num = (node.num * multiply) + add
@@ -644,7 +650,9 @@ class MockExecutor:
         for expression in body:
             retval = interpreter._eval(expression)  # type: ignore[attr-defined]
             if isinstance(retval, (_Break, _Continue)):
-                raise draconic.DraconicSyntaxError.from_node(retval.node, msg="Loop control outside loop", expr=interpreter._expr)  # type: ignore[attr-defined]
+                raise draconic.DraconicSyntaxError.from_node(
+                    retval.node, msg="Loop control outside loop", expr=interpreter._expr
+                )  # type: ignore[attr-defined]
             if isinstance(retval, _Return):
                 return retval.value
             last_val = retval

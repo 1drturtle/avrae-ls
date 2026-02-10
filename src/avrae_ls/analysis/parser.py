@@ -57,12 +57,16 @@ def find_draconic_blocks(source: str, *, treat_as_module: bool = False) -> List[
             line_offset += 1
             char_offset = 0
         line_count = raw.count("\n") + 1 if raw else 1
-        return match.start(), match.end(), DraconicBlock(
-            code=raw,
-            line_offset=line_offset,
-            char_offset=char_offset,
-            line_count=line_count,
-            inline=inline,
+        return (
+            match.start(),
+            match.end(),
+            DraconicBlock(
+                code=raw,
+                line_offset=line_offset,
+                char_offset=char_offset,
+                line_count=line_count,
+                inline=inline,
+            ),
         )
 
     blocks: list[DraconicBlock] = []
