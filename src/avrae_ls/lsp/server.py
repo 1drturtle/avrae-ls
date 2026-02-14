@@ -286,6 +286,7 @@ async def run_alias(server: AvraeLanguageServer, *args: Any):
     text = None
     profile = None
     alias_args: list[str] | None = None
+    raw_alias_args: str | None = None
     doc = None
     if isinstance(payload, dict):
         uri = payload.get("uri")
@@ -293,6 +294,8 @@ async def run_alias(server: AvraeLanguageServer, *args: Any):
         profile = payload.get("profile")
         if isinstance(payload.get("args"), list):
             alias_args = [str(a) for a in payload["args"]]
+        if isinstance(payload.get("rawArgs"), str):
+            raw_alias_args = payload["rawArgs"]
 
     if text is None and uri:
         doc = server.workspace.get_text_document(uri)
@@ -308,6 +311,7 @@ async def run_alias(server: AvraeLanguageServer, *args: Any):
         ctx_data,
         server.state.context_builder.gvar_resolver,
         args=alias_args,
+        raw_args=raw_alias_args,
     )
     preview = simulate_command(rendered.command)
 

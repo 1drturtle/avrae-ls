@@ -127,10 +127,11 @@ async def render_alias_command(
     ctx_data: ContextData,
     resolver: GVarResolver,
     args: list[str] | None = None,
+    raw_args: str | None = None,
 ) -> RenderedAlias:
     """Replace <drac2> blocks with their evaluated values and return final command."""
     body, line_offset = _strip_alias_header_with_offset(text)
-    body = apply_argument_parsing(body, args)
+    body = apply_argument_parsing(body, args, raw_args=raw_args, runtime=True)
     stdout_parts: list[str] = []
     parts: list[str] = []
     last_value = None

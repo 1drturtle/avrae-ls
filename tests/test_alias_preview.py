@@ -4,6 +4,7 @@ from avrae_ls.runtime.alias_preview import render_alias_command
 from avrae_ls.runtime.alias_preview import simulate_command, validate_embed_payload
 from avrae_ls.config import VarSources
 from avrae_ls.runtime.context import ContextData, GVarResolver
+from avrae_ls.runtime import argparser as avrae_argparser
 from avrae_ls.runtime.runtime import MockExecutor
 
 
@@ -52,6 +53,23 @@ async def test_preview_argument_parsing(tmp_path):
     rendered = await render_alias_command(alias_text, executor, ctx, resolver, args=["first arg"])
     assert rendered.command.startswith('echo "first arg"')
     assert rendered.last_value == "first arg"
+
+
+@pytest.mark.asyncio
+async def test_preview_argument_parsing_amp_all_preserves_quotes_in_embed_desc(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+    alias_text = '!alias hello embed -desc """ &*& """'
+    raw_args = 'test "test arg" test'
+    parsed_args = avrae_argparser.argsplit(raw_args)
+
+    rendered = await render_alias_command(alias_text, executor, ctx, resolver, args=parsed_args, raw_args=raw_args)
+    simulated = simulate_command(rendered.command)
+
+    assert simulated.embed is not None
+    assert simulated.embed.description is not None
+    assert '"test arg"' in simulated.embed.description
 
 
 @pytest.mark.asyncio

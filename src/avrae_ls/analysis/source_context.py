@@ -16,7 +16,7 @@ class SourceContext:
 
 
 def build_source_context(source: str, treat_as_module: bool, *, apply_args: bool = True) -> SourceContext:
-    prepared = apply_argument_parsing(source) if apply_args and not treat_as_module else source
+    prepared = apply_argument_parsing(source, runtime=False) if apply_args and not treat_as_module else source
     blocks = find_draconic_blocks(prepared, treat_as_module=treat_as_module)
     return SourceContext(source=source, prepared=prepared, blocks=blocks, treat_as_module=treat_as_module)
 

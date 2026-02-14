@@ -139,6 +139,7 @@ function activate(context) {
         uri: document.uri.toString(),
         text: document.getText(),
         args: parseArgs(previewArgsState),
+        rawArgs: previewArgsState,
       },
     ];
     try {
