@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "*"
+  workflow_dispatch:
 
 jobs:
   build-and-release:
@@ -45,9 +46,11 @@ jobs:
           npx vsce package --out ../dist/avrae-ls-client.vsix
 
       - name: Create draft release
-        if: ${{ success() && steps.build_python.outcome == 'success' && steps.build_vsce.outcome == 'success' }}
+        if: ${{ success() && steps.build_python.outcome == 'success' &&
+          steps.build_vsce.outcome == 'success' }}
         uses: softprops/action-gh-release@v1
         with:
+          token: ${{ secrets.GH_PAT }}
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           draft: true
