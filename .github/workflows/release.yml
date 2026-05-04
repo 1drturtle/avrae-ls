@@ -1,11 +1,12 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "*"
 
 jobs:
-  build-and-publish:
+  build-and-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -43,29 +44,16 @@ jobs:
           npm run bundle
           npx vsce package --out ../dist/avrae-ls-client.vsix
 
-      - name: Upload release assets
+      - name: Create draft release
         if: ${{ success() && steps.build_python.outcome == 'success' && steps.build_vsce.outcome == 'success' }}
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             dist/avrae_ls-*.whl
             dist/avrae_ls-*.tar.gz
             dist/avrae-ls-client.vsix
-
-      - name: Publish VS Code extension
-        if: ${{ success() && steps.build_python.outcome == 'success' && steps.build_vsce.outcome == 'success' }}
-        env:
-          VSCE_PAT: ${{ secrets.VSCODE_PAT }}
-        working-directory: vscode-extension
-        run: |
-          if [ -z "${VSCE_PAT}" ]; then
-            echo "VSCE_PAT is not set" >&2
-            exit 1
-          fi
-          npx vsce publish --packagePath ../dist/avrae-ls-client.vsix
-
-      - name: Publish to PyPI
-        if: ${{ success() && steps.build_python.outcome == 'success' && steps.build_vsce.outcome == 'success' }}
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: uv publish --token "${UV_PUBLISH_TOKEN}"
