@@ -30,14 +30,23 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
 - Tests only (with coverage): `make test` or `uv run pytest tests --cov=src`.
 - CLI smoke test without installing: `uv run python -m avrae_ls --analyze path/to/alias.txt`.
 
-## Alias tests
+## Alias and gvar tests
 
-- Create files ending with `.alias-test` (or `.aliastest`) next to your alias file. Each test starts with an invocation, followed by `---` and the expected result; you can stack multiple tests in one file by repeating this pattern (optional metadata after a second `---` per test).
+- `avrae-ls --run-tests [path]` discovers both alias tests and gvar tests and exits non-zero on failures.
+- Alias tests use `.alias-test` or `.aliastest` next to your alias file. Each test starts with an invocation, followed by `---` and the expected result; you can stack multiple tests in one file by repeating this pattern (optional metadata after a second `---` per test).
   ```
   !my-alias -b example args
   ---
   expected text or number
   ```
+- Gvar tests use `.gvar-test` or `.gvartest` next to a sibling `.gvar` file with the same stem. The test body runs after an implicit `using(...)` import of that module under a sanitized local binding name.
+  ```
+  return my_module.constant
+  ---
+  expected value
+  ```
+- A gvar named `foo-bar.gvar` is exposed to tests as `foo_bar`; a leading digit becomes `gvar_<stem>`.
+- Multi-case `.gvar-test` files are supported. Separate cases with a second `---`, then a blank line before the next test body. Metadata after the second `---` is optional.
 - For embed aliases, put a YAML/JSON dictionary after the separator to compare against the embed preview (partial dictionaries are allowed).
   ```
   !embedtest
@@ -57,7 +66,7 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
     name: Tester
   ```
   `name` is a label for reporting, `vars` are merged into cvars/uvars/svars/gvars, and `character` keys are deep-merged into the mock character.
-- Run them with `avrae-ls --run-tests [path]` (defaults to the current directory); non-zero exit codes indicate failures.
+- Gvar tests compare the direct execution result of the test body, not alias preview/embed output.
 
 ## Config variable substitution
 

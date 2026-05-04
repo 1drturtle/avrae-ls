@@ -1,21 +1,23 @@
 from __future__ import annotations
 
 import logging
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
-
-import yaml
 
 from avrae_ls.runtime import argparser as avrae_argparser
 from avrae_ls.runtime.alias_preview import render_alias_command, simulate_command
 from avrae_ls.runtime.context import ContextBuilder, ContextData
 from avrae_ls.runtime.runtime import MockExecutor
 from avrae_ls.config import VarSources
-
-MISSING_VALUE = "<missing>"
+from avrae_ls.testing._common import (
+    deep_merge_dicts,
+    dict_matches,
+    parse_expected_value,
+    parse_metadata_mapping,
+    scalar_matches,
+)
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +37,14 @@ class AliasTestCase:
     expected: Any
     var_overrides: dict[str, Any] | None = None
     character_overrides: dict[str, Any] | None = None
+
+    @property
+    def target_kind(self) -> str:
+        return "alias"
+
+    @property
+    def target_name(self) -> str:
+        return self.alias_name
 
 
 @dataclass
@@ -106,10 +116,11 @@ def parse_alias_tests(path: Path) -> list[AliasTestCase]:
         alias_name = tokens[0].lstrip("!")
         args = tokens[1:]
         alias_path = _resolve_alias_path(path, alias_name)
-        expected = yaml.safe_load(expected_raw) if expected_raw.strip() else ""
-        meta = yaml.safe_load(meta_raw) if meta_raw.strip() else None
-        if meta is not None and not isinstance(meta, dict):
-            raise AliasTestError(f"{path} metadata after second '---' must be a mapping")
+        expected = parse_expected_value(expected_raw)
+        try:
+            meta = parse_metadata_mapping(meta_raw, str(path))
+        except ValueError as exc:
+            raise AliasTestError(str(exc)) from exc
         name = meta.get("name") if isinstance(meta, dict) else None
         var_overrides = meta.get("vars") if isinstance(meta, dict) else None
         character_overrides = meta.get("character") if isinstance(meta, dict) else None
@@ -200,7 +211,8 @@ async def run_alias_test(
     if case.var_overrides:
         ctx_data.vars = ctx_data.vars.merge(VarSources.from_data(case.var_overrides))
     if case.character_overrides:
-        ctx_data.character = _deep_merge_dicts(ctx_data.character, case.character_overrides)
+        ctx_data.character = deep_merge_dicts(ctx_data.character, case.character_overrides)
+    builder.gvar_resolver.reset(ctx_data.vars.gvars)
 
     rendered = await render_alias_command(alias_source, executor, ctx_data, builder.gvar_resolver, args=case.args)
     if rendered.error:
@@ -236,11 +248,11 @@ async def run_alias_test(
     embed_dict = preview.embed.to_dict() if preview.embed else None
 
     if embed_dict is not None and isinstance(case.expected, dict):
-        passed = _dict_matches(embed_dict, case.expected)
+        passed = dict_matches(embed_dict, case.expected)
         details = None if passed else "Embed preview did not match expected dictionary"
         actual_display = embed_dict
     else:
-        passed = _scalar_matches(case.expected, actual)
+        passed = scalar_matches(case.expected, actual)
         details = None if passed else "Result did not match expected output"
         actual_display = actual
 
@@ -252,79 +264,6 @@ async def run_alias_test(
         embed=embed_dict,
         details=details,
     )
-
-
-def _scalar_matches(expected: Any, actual: Any) -> bool:
-    if isinstance(expected, str):
-        if expected == "":
-            return True
-        pattern = _compile_expected_pattern(expected)
-        if pattern:
-            return pattern.search("" if actual is None else str(actual)) is not None
-        lhs = expected.strip()
-        rhs = "" if actual is None else str(actual).strip()
-        return lhs == rhs
-    return expected == actual
-
-
-def _dict_matches(actual: dict[str, Any], expected: dict[str, Any]) -> bool:
-    for key, expected_val in expected.items():
-        if key not in actual:
-            return False
-        actual_val = actual[key]
-        if not _value_matches(expected_val, actual_val):
-            return False
-    return True
-
-
-def _value_matches(expected: Any, actual: Any) -> bool:
-    if isinstance(expected, dict):
-        return isinstance(actual, dict) and _dict_matches(actual, expected)
-    if isinstance(expected, list):
-        if not isinstance(actual, list) or len(actual) < len(expected):
-            return False
-        return all(_value_matches(e, actual[idx]) for idx, e in enumerate(expected))
-    return _scalar_matches(expected, actual)
-
-
-def diff_mismatched_parts(expected: Any, actual: Any) -> tuple[Any, Any] | None:
-    if _value_matches(expected, actual):
-        return None
-
-    if isinstance(expected, dict) and isinstance(actual, dict):
-        expected_diff: dict[str, Any] = {}
-        actual_diff: dict[str, Any] = {}
-        for key, expected_val in expected.items():
-            if key not in actual:
-                expected_diff[key] = expected_val
-                actual_diff[key] = MISSING_VALUE
-                continue
-            sub_diff = diff_mismatched_parts(expected_val, actual[key])
-            if sub_diff:
-                expected_diff[key], actual_diff[key] = sub_diff
-        if expected_diff:
-            return expected_diff, actual_diff
-        return expected, actual
-
-    if isinstance(expected, list) and isinstance(actual, list):
-        expected_list_diff: list[Any] = []
-        actual_list_diff: list[Any] = []
-        for idx, expected_val in enumerate(expected):
-            if idx >= len(actual):
-                expected_list_diff.append(expected_val)
-                actual_list_diff.append(MISSING_VALUE)
-                continue
-            sub_diff = diff_mismatched_parts(expected_val, actual[idx])
-            if sub_diff:
-                expected_list_diff.append(sub_diff[0])
-                actual_list_diff.append(sub_diff[1])
-        if expected_list_diff:
-            return expected_list_diff, actual_list_diff
-        return expected, actual
-
-    return expected, actual
-
-
 def _split_command(command: str, path: Path) -> list[str]:
     try:
         tokens = avrae_argparser.argsplit(command)
@@ -352,18 +291,6 @@ def _resolve_alias_path(path: Path, alias_name: str) -> Path:
     raise AliasTestError(
         f"Could not find alias file for '{alias_name}'. Checked: {', '.join(str(base_dir / c) for c in candidates)}"
     )
-
-
-def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base or {})
-    for key, val in (override or {}).items():
-        if key in merged and isinstance(merged[key], dict) and isinstance(val, dict):
-            merged[key] = _deep_merge_dicts(merged[key], val)
-        else:
-            merged[key] = val
-    return merged
-
-
 def _alias_candidates(path: Path, alias_name: str) -> Sequence[str]:
     base = path.stem.removeprefix("test-") or alias_name
     names = [alias_name]
@@ -371,43 +298,3 @@ def _alias_candidates(path: Path, alias_name: str) -> Sequence[str]:
         names.append(base)
     suffixes = ["", ".alias", ".txt"]
     return [f"{name}{suffix}" for name in names for suffix in suffixes]
-
-
-def _compile_expected_pattern(text: str) -> re.Pattern[str] | None:
-    """
-    Interpret strings with /.../ segments (or re:prefix) as regex.
-
-    - `/foo/` or `re:foo` => regex `foo`
-    - Mixed literals + regex, e.g. `Hello /world.*/` => literal `Hello ` + regex `world.*`
-    """
-    if not text:
-        return None
-    if text.startswith("re:"):
-        try:
-            return re.compile(text[3:])
-        except re.error:
-            return None
-
-    parts = re.split(r"(?<!\\)/(.*?)(?<!\\)/", text)
-    if len(parts) == 1:
-        return None
-
-    if len(parts) == 3 and parts[0] == "" and parts[2] == "":
-        pattern = parts[1].replace("\\/", "/")
-        try:
-            return re.compile(pattern)
-        except re.error:
-            return None
-
-    regex_parts: list[str] = []
-    for idx, part in enumerate(parts):
-        unescaped = part.replace("\\/", "/")
-        if idx % 2 == 0:
-            regex_parts.append(re.escape(unescaped))
-        else:
-            regex_parts.append(unescaped)
-    pattern = "^" + "".join(regex_parts) + "$"
-    try:
-        return re.compile(pattern)
-    except re.error:
-        return None

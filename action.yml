@@ -1,8 +1,8 @@
-name: "Avrae Alias Tests"
-description: "Run avrae-ls alias tests in CI."
+name: "Avrae Alias And Gvar Tests"
+description: "Run avrae-ls alias and gvar tests in CI."
 inputs:
   test-path:
-    description: "Path to search for alias test files."
+    description: "Path to search for alias and gvar test files."
     required: false
     default: "."
   config-path:
@@ -39,7 +39,7 @@ runs:
           fi
           cp "${{ inputs.config-path }}" ".avraels.json"
         fi
-    - name: Run alias tests
+    - name: Run alias and gvar tests
       shell: bash
       env:
         AVRAE_TOKEN: ${{ inputs.avrae-token }}

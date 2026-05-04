@@ -20,11 +20,16 @@ from avrae_ls.testing.alias_tests import (
     parse_alias_tests,
     run_alias_tests,
 )
+from avrae_ls.testing.gvar_tests import GVarTestError, GVarTestResult, parse_gvar_tests, run_gvar_tests
 from avrae_ls.config import AvraeLSConfig, CONFIG_FILENAME, load_config
 from avrae_ls.runtime.context import ContextBuilder
 from avrae_ls.analysis.diagnostics import DiagnosticProvider
 from avrae_ls.runtime.runtime import MockExecutor
 from avrae_ls.lsp.server import create_server, __version__
+
+ALIAS_TEST_PATTERNS = ("*.alias-test", "*.aliastest")
+GVAR_TEST_PATTERNS = ("*.gvar-test", "*.gvartest")
+RUN_TEST_PATTERNS = ALIAS_TEST_PATTERNS + GVAR_TEST_PATTERNS
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -40,7 +45,7 @@ def main(argv: list[str] | None = None) -> None:
         metavar="PATH",
         nargs="?",
         const=".",
-        help="Run alias tests in PATH (defaults to current directory)",
+        help="Run alias and gvar tests in PATH (defaults to current directory)",
     )
     parser.add_argument(
         "--silent-gvar-fetch",
@@ -148,7 +153,7 @@ def _run_alias_tests(
 
     workspace_root = _discover_workspace_root(target)
     log = logging.getLogger(__name__)
-    log.info("Running alias tests in %s (workspace root: %s)", target, workspace_root)
+    log.info("Running alias and gvar tests in %s (workspace root: %s)", target, workspace_root)
 
     config = _load_runtime_config(
         workspace_root,
@@ -161,23 +166,29 @@ def _run_alias_tests(
     builder = ContextBuilder(config)
     executor = MockExecutor(config.service)
 
-    test_files = discover_test_files(target)
-    cases = []
+    test_files = discover_test_files(target, patterns=RUN_TEST_PATTERNS)
+    alias_cases = []
+    gvar_cases = []
     parse_errors: list[str] = []
     for test_file in test_files:
         try:
-            cases.extend(parse_alias_tests(test_file))
-        except AliasTestError as exc:
+            if _is_gvar_test_file(test_file):
+                gvar_cases.extend(parse_gvar_tests(test_file))
+            else:
+                alias_cases.extend(parse_alias_tests(test_file))
+        except (AliasTestError, GVarTestError) as exc:
             parse_errors.append(str(exc))
 
     if parse_errors:
         for err in parse_errors:
             print(err, file=sys.stderr)
-    if not cases:
-        print(f"No alias tests found under {target}")
+    if not alias_cases and not gvar_cases:
+        print(f"No alias or gvar tests found under {target}")
         return 1 if parse_errors else 0
 
-    results = asyncio.run(run_alias_tests(cases, builder, executor))
+    alias_results = asyncio.run(run_alias_tests(alias_cases, builder, executor)) if alias_cases else []
+    gvar_results = asyncio.run(run_gvar_tests(gvar_cases, builder, executor)) if gvar_cases else []
+    results = [*alias_results, *gvar_results]
     _print_test_results(results, workspace_root)
 
     failures = [res for res in results if not res.passed]
@@ -204,14 +215,14 @@ def _load_runtime_config(
     return config
 
 
-def _print_test_results(results: Sequence[AliasTestResult], workspace_root: Path) -> None:
+def _print_test_results(results: Sequence[AliasTestResult | GVarTestResult], workspace_root: Path) -> None:
     total = len(results)
     passed = 0
     for res in results:
         rel = _relative_to_workspace(res.case.path, workspace_root)
         label = f"{rel} ({res.case.name})" if res.case.name else rel
         status = "PASS" if res.passed else "FAIL"
-        print(f"[{status}] {label} (alias: {res.case.alias_name})")
+        print(f"[{status}] {label} ({res.case.target_kind}: {res.case.target_name})")
         if res.passed:
             if res.stdout:
                 print(f"  Stdout: {res.stdout.strip()}")
@@ -321,6 +332,10 @@ def _discover_workspace_root(target: Path) -> Path:
         if (folder / CONFIG_FILENAME).exists():
             return folder
     return current
+
+
+def _is_gvar_test_file(path: Path) -> bool:
+    return path.name.endswith(".gvar-test") or path.name.endswith(".gvartest")
 
 
 def _print_diagnostics(path: Path, diagnostics: Iterable[types.Diagnostic]) -> None:

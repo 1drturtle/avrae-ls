@@ -9,6 +9,7 @@ from typing import Iterable, List, Sequence
 
 from lsprotocol import types
 
+from avrae_ls.gvar_utils import sanitize_gvar_binding
 from avrae_ls.lsp.codes import MISSING_GVAR_CODE, UNDEFINED_NAME_CODE, UNSUPPORTED_IMPORT_CODE
 from avrae_ls.analysis.parser import DraconicBlock
 from avrae_ls.analysis.source_context import build_source_context
@@ -130,7 +131,7 @@ def _using_stub_action(
     diag: types.Diagnostic,
     gvar_id: str,
 ) -> types.CodeAction:
-    alias = _sanitize_symbol(gvar_id)
+    alias = sanitize_gvar_binding(gvar_id)
     insertion_line, indent = _block_insertion(blocks, diag.range.start.line, source)
     edit = _insert_line_edit(insertion_line, indent, f'using({alias}="{gvar_id}")\n')
     return types.CodeAction(
@@ -184,15 +185,6 @@ def _line_indent(source: str, line: int, default: int = 0) -> int:
         if match:
             return len(match.group(1))
     return default
-
-
-def _sanitize_symbol(label: str) -> str:
-    cleaned = re.sub(r"\W+", "_", str(label))
-    if cleaned and cleaned[0].isdigit():
-        cleaned = f"gvar_{cleaned}"
-    return cleaned or "gvar_import"
-
-
 def _kind_allowed(kind: str, only: Sequence[str]) -> bool:
     if not only:
         return True
