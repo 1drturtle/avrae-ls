@@ -111,6 +111,17 @@ def diff_mismatched_parts(expected: Any, actual: Any) -> tuple[Any, Any] | None:
     return expected, actual
 
 
+def merge_new_gvars_into_suite_cache(
+    suite_cache: dict[str, Any], active_cache: dict[str, Any], *, exclude_keys: set[str] | None = None
+) -> None:
+    excluded = {str(key) for key in (exclude_keys or set())}
+    for key, value in active_cache.items():
+        key_str = str(key)
+        if key_str in excluded or key_str in suite_cache:
+            continue
+        suite_cache[key_str] = value
+
+
 def compile_expected_pattern(text: str) -> re.Pattern[str] | None:
     """
     Interpret strings with /.../ segments (or re:prefix) as regex.

@@ -2,7 +2,7 @@
   "name": "avrae-ls-client",
   "displayName": "Avrae Draconic Alias Language Server",
   "description": "VS Code client for avrae-ls (draconic alias diagnostics and mock execution).",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -47,7 +47,8 @@
           "Draconic Module"
         ],
         "extensions": [
-          ".alias-module"
+          ".alias-module",
+          ".gvar"
         ],
         "configuration": "./language-configuration.json"
       }

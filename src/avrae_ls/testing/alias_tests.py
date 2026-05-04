@@ -14,6 +14,7 @@ from avrae_ls.config import VarSources
 from avrae_ls.testing._common import (
     deep_merge_dicts,
     dict_matches,
+    merge_new_gvars_into_suite_cache,
     parse_expected_value,
     parse_metadata_mapping,
     scalar_matches,
@@ -142,7 +143,11 @@ def parse_alias_tests(path: Path) -> list[AliasTestCase]:
 
 
 async def run_alias_tests(
-    cases: Iterable[AliasTestCase], builder: ContextBuilder, executor: MockExecutor
+    cases: Iterable[AliasTestCase],
+    builder: ContextBuilder,
+    executor: MockExecutor,
+    *,
+    suite_gvar_cache: dict[str, Any] | None = None,
 ) -> list[AliasTestResult]:
     case_list = list(cases)
     alias_sources: dict[Path, str] = {}
@@ -163,6 +168,7 @@ async def run_alias_tests(
         )
 
     baseline = builder.build_baseline()
+    shared_gvar_cache = suite_gvar_cache if suite_gvar_cache is not None else dict(baseline.vars.gvars)
     results: list[AliasTestResult] = []
     for case in case_list:
         error = alias_errors.get(case.alias_path)
@@ -176,6 +182,7 @@ async def run_alias_tests(
                 executor,
                 alias_source=alias_sources.get(case.alias_path),
                 base_context=baseline,
+                suite_gvar_cache=shared_gvar_cache,
             )
         )
     return results
@@ -188,6 +195,7 @@ async def run_alias_test(
     *,
     alias_source: str | None = None,
     base_context: ContextData | None = None,
+    suite_gvar_cache: dict[str, Any] | None = None,
 ) -> AliasTestResult:
     if alias_source is None:
         source_started = time.perf_counter()
@@ -212,9 +220,17 @@ async def run_alias_test(
         ctx_data.vars = ctx_data.vars.merge(VarSources.from_data(case.var_overrides))
     if case.character_overrides:
         ctx_data.character = deep_merge_dicts(ctx_data.character, case.character_overrides)
-    builder.gvar_resolver.reset(ctx_data.vars.gvars)
+    shared_gvar_cache = suite_gvar_cache if suite_gvar_cache is not None else dict(ctx_data.vars.gvars)
+    builder.gvar_resolver.load_snapshot(shared_gvar_cache)
+    builder.gvar_resolver.seed(ctx_data.vars.gvars)
+    local_only_gvars = set(ctx_data.vars.gvars.keys())
 
     rendered = await render_alias_command(alias_source, executor, ctx_data, builder.gvar_resolver, args=case.args)
+    merge_new_gvars_into_suite_cache(
+        shared_gvar_cache,
+        builder.gvar_resolver.snapshot(),
+        exclude_keys=local_only_gvars,
+    )
     if rendered.error:
         return AliasTestResult(
             case=case,

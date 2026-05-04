@@ -6,6 +6,7 @@ import pytest
 from avrae_ls.config import AvraeLSConfig
 from avrae_ls.runtime.context import ContextBuilder, GVarResolver
 from avrae_ls.lsp.server import AvraeLanguageServer, refresh_gvars
+from avrae_ls.testing._common import merge_new_gvars_into_suite_cache
 
 
 @pytest.mark.asyncio
@@ -55,6 +56,28 @@ def test_context_builder_resets_cached_gvars_per_build(tmp_path):
     builder.build("default")
 
     assert resolver.get_local("cached") is None
+
+
+def test_gvar_resolver_snapshot_and_load_snapshot_are_isolated():
+    cfg = AvraeLSConfig.default(Path("."))
+    resolver = GVarResolver(cfg)
+    resolver.seed({"a": "1"})
+
+    snapshot = resolver.snapshot()
+    snapshot["a"] = "mutated"
+    resolver.load_snapshot(snapshot)
+
+    assert resolver.get_local("a") == "mutated"
+    assert resolver.snapshot() == {"a": "mutated"}
+
+
+def test_merge_new_gvars_into_suite_cache_only_adds_missing_keys():
+    suite_cache = {"seed": "x", "keep": "original"}
+    active_cache = {"seed": "x", "keep": "override", "new": "value", "local": "skip"}
+
+    merge_new_gvars_into_suite_cache(suite_cache, active_cache, exclude_keys={"local"})
+
+    assert suite_cache == {"seed": "x", "keep": "original", "new": "value"}
 
 
 @pytest.mark.asyncio

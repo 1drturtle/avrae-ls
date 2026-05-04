@@ -355,3 +355,50 @@ async def test_alias_tests_allow_metadata_vars_override(tmp_path):
     case = parse_alias_tests(test_path)[0]
     result = (await run_alias_tests([case], builder, executor))[0]
     assert result.passed
+
+
+@pytest.mark.asyncio
+async def test_alias_tests_reuse_nested_gvar_fetches_across_cases(monkeypatch, tmp_path):
+    alias_path = tmp_path / "outer.alias"
+    alias_path.write_text('!alias outer echo <drac2>using(mod="remote")\nreturn mod.answer</drac2>')
+    test_path = tmp_path / "outer.alias-test"
+    test_path.write_text('!outer\n---\n"42"\n\n!outer\n---\n"42"\n')
+
+    config = AvraeLSConfig.default(tmp_path)
+    config.enable_gvar_fetch = True
+    config.service.token = "token"
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    calls: list[str] = []
+
+    class DummyResponse:
+        status_code = 200
+
+        def __init__(self, key: str):
+            self.key = key
+
+        def json(self):
+            return {"value": "answer = 42\n"}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            calls.append(url.rsplit("/", 1)[-1])
+            return DummyResponse(calls[-1])
+
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
+
+    cases = parse_alias_tests(test_path)
+    results = await run_alias_tests(cases, builder, executor)
+
+    assert all(result.passed for result in results)
+    assert calls == ["remote"]

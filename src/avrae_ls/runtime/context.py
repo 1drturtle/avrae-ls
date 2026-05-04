@@ -269,9 +269,7 @@ class GVarResolver:
         return True
 
     def reset(self, gvars: Dict[str, Any] | None = None) -> None:
-        self._cache = {}
-        if gvars:
-            self._cache.update({str(k): v for k, v in gvars.items()})
+        self.load_snapshot(gvars)
 
     def seed(self, gvars: Dict[str, Any] | None = None) -> None:
         """Merge provided gvars into the cache without dropping fetched values."""
@@ -358,6 +356,11 @@ class GVarResolver:
 
     def snapshot(self) -> Dict[str, Any]:
         return dict(self._cache)
+
+    def load_snapshot(self, gvars: Dict[str, Any] | None = None) -> None:
+        self._cache = {}
+        if gvars:
+            self._cache.update({str(k): v for k, v in gvars.items()})
 
     async def refresh(self, seed: Dict[str, Any] | None = None, keys: Iterable[str] | None = None) -> Dict[str, Any]:
         self.reset(seed)

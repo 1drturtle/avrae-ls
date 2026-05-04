@@ -12,14 +12,8 @@ import yaml
 
 from lsprotocol import types
 
-from avrae_ls.testing.alias_tests import (
-    AliasTestError,
-    AliasTestResult,
-    diff_mismatched_parts,
-    discover_test_files,
-    parse_alias_tests,
-    run_alias_tests,
-)
+from avrae_ls.testing.alias_tests import AliasTestError, AliasTestResult, discover_test_files, parse_alias_tests, run_alias_tests
+from avrae_ls.testing._common import diff_mismatched_parts
 from avrae_ls.testing.gvar_tests import GVarTestError, GVarTestResult, parse_gvar_tests, run_gvar_tests
 from avrae_ls.config import AvraeLSConfig, CONFIG_FILENAME, load_config
 from avrae_ls.runtime.context import ContextBuilder
@@ -165,6 +159,7 @@ def _run_alias_tests(
 
     builder = ContextBuilder(config)
     executor = MockExecutor(config.service)
+    shared_gvar_cache = dict(builder.build_baseline().vars.gvars)
 
     test_files = discover_test_files(target, patterns=RUN_TEST_PATTERNS)
     alias_cases = []
@@ -186,8 +181,16 @@ def _run_alias_tests(
         print(f"No alias or gvar tests found under {target}")
         return 1 if parse_errors else 0
 
-    alias_results = asyncio.run(run_alias_tests(alias_cases, builder, executor)) if alias_cases else []
-    gvar_results = asyncio.run(run_gvar_tests(gvar_cases, builder, executor)) if gvar_cases else []
+    alias_results = (
+        asyncio.run(run_alias_tests(alias_cases, builder, executor, suite_gvar_cache=shared_gvar_cache))
+        if alias_cases
+        else []
+    )
+    gvar_results = (
+        asyncio.run(run_gvar_tests(gvar_cases, builder, executor, suite_gvar_cache=shared_gvar_cache))
+        if gvar_cases
+        else []
+    )
     results = [*alias_results, *gvar_results]
     _print_test_results(results, workspace_root)
 

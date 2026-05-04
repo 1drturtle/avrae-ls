@@ -10,7 +10,13 @@ from avrae_ls.config import VarSources
 from avrae_ls.gvar_utils import sanitize_gvar_binding
 from avrae_ls.runtime.context import ContextBuilder, ContextData
 from avrae_ls.runtime.runtime import MockExecutor, ModuleExecutionError
-from avrae_ls.testing._common import deep_merge_dicts, parse_expected_value, parse_metadata_mapping, value_matches
+from avrae_ls.testing._common import (
+    deep_merge_dicts,
+    merge_new_gvars_into_suite_cache,
+    parse_expected_value,
+    parse_metadata_mapping,
+    value_matches,
+)
 
 log = logging.getLogger(__name__)
 
@@ -124,7 +130,11 @@ def parse_gvar_tests(path: Path) -> list[GVarTestCase]:
 
 
 async def run_gvar_tests(
-    cases: Iterable[GVarTestCase], builder: ContextBuilder, executor: MockExecutor
+    cases: Iterable[GVarTestCase],
+    builder: ContextBuilder,
+    executor: MockExecutor,
+    *,
+    suite_gvar_cache: dict[str, Any] | None = None,
 ) -> list[GVarTestResult]:
     case_list = list(cases)
     gvar_sources: dict[Path, str] = {}
@@ -141,6 +151,7 @@ async def run_gvar_tests(
         log.debug("Loaded %d gvar source file(s) for tests in %.2fms", len(gvar_sources), log_elapsed)
 
     baseline = builder.build_baseline()
+    shared_gvar_cache = suite_gvar_cache if suite_gvar_cache is not None else dict(baseline.vars.gvars)
     results: list[GVarTestResult] = []
     for case in case_list:
         error = gvar_errors.get(case.gvar_path)
@@ -154,6 +165,7 @@ async def run_gvar_tests(
                 executor,
                 gvar_source=gvar_sources.get(case.gvar_path),
                 base_context=baseline,
+                suite_gvar_cache=shared_gvar_cache,
             )
         )
     return results
@@ -166,6 +178,7 @@ async def run_gvar_test(
     *,
     gvar_source: str | None = None,
     base_context: ContextData | None = None,
+    suite_gvar_cache: dict[str, Any] | None = None,
 ) -> GVarTestResult:
     if gvar_source is None:
         source_started = time.perf_counter()
@@ -186,15 +199,24 @@ async def run_gvar_test(
         ctx_data.vars = ctx_data.vars.merge(VarSources.from_data(case.var_overrides))
     if case.character_overrides:
         ctx_data.character = deep_merge_dicts(ctx_data.character, case.character_overrides)
-    builder.gvar_resolver.reset(ctx_data.vars.gvars)
+    shared_gvar_cache = suite_gvar_cache if suite_gvar_cache is not None else dict(ctx_data.vars.gvars)
+    builder.gvar_resolver.load_snapshot(shared_gvar_cache)
+    builder.gvar_resolver.seed(ctx_data.vars.gvars)
+    local_only_gvars = set(ctx_data.vars.gvars.keys())
 
     collision = _reserved_name_collision(case.binding_name, executor, ctx_data)
     if collision is not None:
         return GVarTestResult(case=case, passed=False, actual=None, stdout="", error=collision)
 
     builder.gvar_resolver.seed({case.gvar_name: gvar_source})
+    local_only_gvars.add(case.gvar_name)
     wrapped_code = _wrap_test_body(case.binding_name, case.gvar_name, case.body)
     result = await executor.run(wrapped_code, ctx_data, builder.gvar_resolver)
+    merge_new_gvars_into_suite_cache(
+        shared_gvar_cache,
+        builder.gvar_resolver.snapshot(),
+        exclude_keys=local_only_gvars,
+    )
     if result.error:
         error_line, error_col = _map_error_position(result.error, wrapper_lines=1)
         return GVarTestResult(

@@ -183,6 +183,128 @@ async def test_gvar_tests_support_nested_using_dependencies(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_gvar_tests_reuse_nested_gvar_fetches_across_cases(monkeypatch, tmp_path):
+    gvar_path = tmp_path / "main.gvar"
+    gvar_path.write_text('using(inner="inner")\nvalue = inner.answer\n')
+    test_path = tmp_path / "main.gvar-test"
+    test_path.write_text("return main.value\n---\n42\n---\n\nreturn main.value\n---\n42\n")
+
+    config = AvraeLSConfig.default(tmp_path)
+    config.enable_gvar_fetch = True
+    config.service.token = "token"
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    calls: list[str] = []
+
+    class DummyResponse:
+        status_code = 200
+
+        def json(self):
+            return {"value": "answer = 42\n"}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            calls.append(url.rsplit("/", 1)[-1])
+            return DummyResponse()
+
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
+
+    cases = parse_gvar_tests(test_path)
+    results = await run_gvar_tests(cases, builder, executor)
+
+    assert all(result.passed for result in results)
+    assert calls == ["inner"]
+
+
+@pytest.mark.asyncio
+async def test_gvar_test_target_module_does_not_leak_into_later_tests(tmp_path):
+    gvar_path = tmp_path / "math.gvar"
+    gvar_path.write_text("answer = 42\n")
+    math_test_path = tmp_path / "math.gvar-test"
+    math_test_path.write_text("return math.answer\n---\n42\n")
+
+    other_gvar_path = tmp_path / "other.gvar"
+    other_gvar_path.write_text("value = 1\n")
+    other_test_path = tmp_path / "other.gvar-test"
+    other_test_path.write_text("return get_gvar('math')\n---\nnull\n")
+
+    config = AvraeLSConfig.default(tmp_path)
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    cases = [parse_gvar_tests(math_test_path)[0], parse_gvar_tests(other_test_path)[0]]
+    results = await run_gvar_tests(cases, builder, executor)
+
+    assert all(result.passed for result in results)
+
+
+@pytest.mark.asyncio
+async def test_gvar_test_metadata_gvars_override_is_local_to_one_case(monkeypatch, tmp_path):
+    gvar_path = tmp_path / "main.gvar"
+    gvar_path.write_text('using(inner="inner")\nvalue = inner.answer\n')
+    test_path = tmp_path / "main.gvar-test"
+    test_path.write_text(
+        "return main.value\n"
+        "---\n"
+        "99\n"
+        "---\n"
+        "vars:\n"
+        "  gvars:\n"
+        "    inner: \"answer = 99\\n\"\n"
+        "\n"
+        "return main.value\n"
+        "---\n"
+        "42\n"
+    )
+
+    config = AvraeLSConfig.default(tmp_path)
+    config.enable_gvar_fetch = True
+    config.service.token = "token"
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    calls: list[str] = []
+
+    class DummyResponse:
+        status_code = 200
+
+        def json(self):
+            return {"value": "answer = 42\n"}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            calls.append(url.rsplit("/", 1)[-1])
+            return DummyResponse()
+
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
+
+    cases = parse_gvar_tests(test_path)
+    results = await run_gvar_tests(cases, builder, executor)
+
+    assert all(result.passed for result in results)
+    assert calls == ["inner"]
+
+
+@pytest.mark.asyncio
 async def test_gvar_tests_map_runtime_error_lines_to_test_body(tmp_path):
     gvar_path = tmp_path / "boom.gvar"
     gvar_path.write_text("answer = 42\n")
@@ -240,3 +362,46 @@ def test_run_tests_discovers_alias_and_gvar_tests(tmp_path, capsys):
     assert exit_code == 0
     assert "(alias: hello)" in captured.out
     assert "(gvar: math)" in captured.out
+
+
+def test_run_tests_shares_gvar_cache_between_alias_and_gvar_suites(monkeypatch, tmp_path):
+    (tmp_path / ".avraels.json").write_text('{"enableGvarFetch": true, "avraeService": {"token": "token"}}')
+
+    alias_path = tmp_path / "outer.alias"
+    alias_path.write_text('!alias outer echo <drac2>using(mod="remote")\nreturn mod.answer</drac2>')
+    alias_test_path = tmp_path / "outer.alias-test"
+    alias_test_path.write_text('!outer\n---\n"42"\n')
+
+    gvar_path = tmp_path / "main.gvar"
+    gvar_path.write_text('using(inner="remote")\nvalue = inner.answer\n')
+    gvar_test_path = tmp_path / "main.gvar-test"
+    gvar_test_path.write_text("return main.value\n---\n42\n")
+
+    calls: list[str] = []
+
+    class DummyResponse:
+        status_code = 200
+
+        def json(self):
+            return {"value": "answer = 42\n"}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            calls.append(url.rsplit("/", 1)[-1])
+            return DummyResponse()
+
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
+
+    exit_code = _run_alias_tests(tmp_path)
+
+    assert exit_code == 0
+    assert calls == ["remote"]
