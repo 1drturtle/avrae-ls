@@ -4,9 +4,10 @@ import asyncio
 import copy
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Tuple
 
 import httpx
 
@@ -25,31 +26,79 @@ class ContextData:
     vars: VarSources = field(default_factory=VarSources)
 
 
+@dataclass(frozen=True)
+class _BaselineCacheEntry:
+    context: ContextData
+    var_file_sig: Tuple[tuple[str, int, int], ...]
+
+
 class ContextBuilder:
     def __init__(self, config: AvraeLSConfig):
         self._config = config
         self._gvar_resolver = GVarResolver(config)
+        self._baseline_cache: dict[str, _BaselineCacheEntry] = {}
 
     @property
     def gvar_resolver(self) -> "GVarResolver":
         return self._gvar_resolver
 
     def build(self, profile_name: str | None = None) -> ContextData:
+        baseline = self.build_baseline(profile_name)
+        return self.build_from_baseline(baseline)
+
+    def build_baseline(self, profile_name: str | None = None) -> ContextData:
+        started = time.perf_counter()
         profile = self._select_profile(profile_name)
-        # Deep copy profile data so mutations during a run do not persist.
-        profile_character = copy.deepcopy(profile.character)
-        profile_combat = copy.deepcopy(profile.combat)
-        profile_ctx = copy.deepcopy(profile.ctx)
+        cache_key = profile.name
+        var_file_sig = self._var_file_signature()
+        cached = self._baseline_cache.get(cache_key)
+        if cached is not None and cached.var_file_sig == var_file_sig:
+            return cached.context
+
+        # Clone profile payload once; per-run contexts are cloned from this baseline.
+        profile_character = _fast_clone(profile.character)
+        profile_combat = _fast_clone(profile.combat)
+        profile_ctx = _fast_clone(profile.ctx)
 
         combat = self._ensure_me_combatant(profile_combat, profile_character, profile_ctx.get("author"))
         merged_vars = self._merge_character_cvars(profile_character, self._load_var_files().merge(profile.vars))
-        self._gvar_resolver.reset(merged_vars.gvars)
-        return ContextData(
+        baseline = ContextData(
             ctx=profile_ctx,
             combat=combat,
             character=profile_character,
             vars=merged_vars,
         )
+        self._baseline_cache[cache_key] = _BaselineCacheEntry(context=baseline, var_file_sig=var_file_sig)
+        log.debug(
+            "Context baseline built for profile '%s' in %.2fms",
+            profile.name,
+            (time.perf_counter() - started) * 1000,
+        )
+        return baseline
+
+    def build_from_baseline(
+        self,
+        baseline: ContextData | None = None,
+        profile_name: str | None = None,
+    ) -> ContextData:
+        started = time.perf_counter()
+        if baseline is None:
+            baseline = self.build_baseline(profile_name)
+        vars_copy = VarSources(
+            cvars=dict(baseline.vars.cvars),
+            uvars=dict(baseline.vars.uvars),
+            svars=dict(baseline.vars.svars),
+            gvars=dict(baseline.vars.gvars),
+        )
+        self._gvar_resolver.reset(vars_copy.gvars)
+        ctx_data = ContextData(
+            ctx=_fast_clone(baseline.ctx),
+            combat=_fast_clone(baseline.combat),
+            character=_fast_clone(baseline.character),
+            vars=vars_copy,
+        )
+        log.debug("Context clone built in %.2fms", (time.perf_counter() - started) * 1000)
+        return ctx_data
 
     def _select_profile(self, profile_name: str | None) -> ContextProfile:
         if profile_name and profile_name in self._config.profiles:
@@ -66,6 +115,16 @@ class ContextBuilder:
                 continue
             merged = merged.merge(_var_sources_from_file(path, data))
         return merged
+
+    def _var_file_signature(self) -> Tuple[tuple[str, int, int], ...]:
+        sig: list[tuple[str, int, int]] = []
+        for path in self._config.var_files:
+            try:
+                stat = path.stat()
+                sig.append((str(path), stat.st_mtime_ns, stat.st_size))
+            except OSError:
+                sig.append((str(path), -1, -1))
+        return tuple(sig)
 
     def _merge_character_cvars(self, character: Dict[str, Any], vars: VarSources) -> VarSources:
         merged = vars
@@ -94,6 +153,13 @@ class ContextBuilder:
                 return author_id is not None and str(combatant.get("controller")) == str(author_id)
             except Exception:
                 return False
+
+        def _same_combatant(lhs: Dict[str, Any], rhs: Dict[str, Any]) -> bool:
+            lhs_id = lhs.get("id")
+            rhs_id = rhs.get("id")
+            if lhs_id is None or rhs_id is None:
+                return False
+            return str(lhs_id) == str(rhs_id)
 
         # Use an existing combatant controlled by the author if me is missing.
         if me is None:
@@ -133,7 +199,7 @@ class ContextBuilder:
 
         if me is not None:
             combat["me"] = me
-            if not any(c is me for c in combatants) and not any(_matches_author(c) for c in combatants):
+            if not any((c is me) or _same_combatant(c, me) for c in combatants) and not any(_matches_author(c) for c in combatants):
                 combatants.insert(0, me)
             combat["combatants"] = combatants
             if "current" not in combat or combat.get("current") is None:
@@ -399,3 +465,18 @@ def _parse_gvar_value(var_file: Path, key: Any, value: Any) -> Any:
     except OSError as exc:
         log.warning("Failed to read gvar content file for '%s' (%s): %s", key, gvar_path, exc)
         return _SKIP_GVAR
+
+
+def _fast_clone(value: Any) -> Any:
+    """Clone nested container primitives faster than copy.deepcopy for context payloads."""
+    if isinstance(value, (str, int, float, bool, type(None), bytes)):
+        return value
+    if type(value) is dict:
+        return {k: _fast_clone(v) for k, v in value.items()}
+    if type(value) is list:
+        return [_fast_clone(v) for v in value]
+    if type(value) is tuple:
+        return tuple(_fast_clone(v) for v in value)
+    if type(value) is set:
+        return {_fast_clone(v) for v in value}
+    return copy.deepcopy(value)

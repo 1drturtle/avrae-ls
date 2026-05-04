@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import io
 import json
 import logging
@@ -9,7 +10,7 @@ import random
 import re
 import time
 from types import SimpleNamespace
-from collections import UserList
+from collections import OrderedDict, UserList
 import yaml
 from dataclasses import dataclass
 from typing import Any, Dict, Set, Callable
@@ -26,6 +27,8 @@ from avrae_ls.runtime import argparser as avrae_argparser
 
 _VERIFY_SIGNATURE_TIMEOUT = 5.0
 _VERIFY_SIGNATURE_RETRIES = 0
+_EXECUTOR_ENABLE_AST_CACHE = True
+_EXECUTOR_AST_CACHE_SIZE = 256
 
 
 # Minimal stand-in for Avrae's AliasException
@@ -288,6 +291,8 @@ class MockExecutor:
     def __init__(self, service_config: AvraeServiceConfig | None = None):
         self._base_builtins = _default_builtins()
         self._service_config = service_config or AvraeServiceConfig()
+        self._enable_ast_cache = _EXECUTOR_ENABLE_AST_CACHE
+        self._ast_cache: OrderedDict[str, tuple[str, list[Any]]] = OrderedDict()
 
     def available_names(self, ctx_data: ContextData) -> Set[str]:
         builtin_names = set(self._base_builtins.keys())
@@ -333,6 +338,7 @@ class MockExecutor:
         ctx_data: ContextData,
         gvar_resolver: GVarResolver | None = None,
     ) -> ExecutionResult:
+        run_started = time.perf_counter()
         buffer = io.StringIO()
         resolver = gvar_resolver
         interpreter_ref: dict[str, draconic.DraconicInterpreter | None] = {"interpreter": None}
@@ -368,6 +374,45 @@ class MockExecutor:
 
         value = None
         error: BaseException | None = None
+        parse_started = time.perf_counter()
+        code_to_run, parsed, cache_hit, parse_error = self._parse_for_execution(interpreter, code)
+        parse_elapsed_ms = (time.perf_counter() - parse_started) * 1000
+        if parse_error is not None:
+            log.debug("Mock execution error: %s", parse_error, exc_info=parse_error)
+            return ExecutionResult(stdout=buffer.getvalue(), value=value, error=parse_error)
+
+        if resolver:
+            await _ensure_literal_gvars(code_to_run, resolver)
+            await _ensure_nested_gvars(resolver)
+            await _ensure_nested_gvars(resolver)
+
+        exec_started = time.perf_counter()
+        try:
+            interpreter._preflight()
+            value = self._exec_with_value(interpreter, parsed)
+        except BaseException as exc:  # draconic raises BaseException subclasses
+            error = exc
+            log.debug("Mock execution error: %s", exc, exc_info=exc)
+        exec_elapsed_ms = (time.perf_counter() - exec_started) * 1000
+        log.debug(
+            "MockExecutor.run parse=%.2fms execute=%.2fms total=%.2fms cache_hit=%s",
+            parse_elapsed_ms,
+            exec_elapsed_ms,
+            (time.perf_counter() - run_started) * 1000,
+            cache_hit,
+        )
+        return ExecutionResult(stdout=buffer.getvalue(), value=value, error=error)
+
+    def _parse_for_execution(
+        self,
+        interpreter: draconic.DraconicInterpreter,
+        code: str,
+    ) -> tuple[str, list[Any], bool, BaseException | None]:
+        cached = self._get_ast_cache(code)
+        if cached is not None:
+            code_to_run, parsed_template = cached
+            return code_to_run, copy.deepcopy(parsed_template), True, None
+
         code_to_run = code
         try:
             parsed = interpreter.parse(code_to_run)
@@ -377,22 +422,28 @@ class MockExecutor:
             try:
                 parsed = interpreter.parse(code_to_run)
             except BaseException as exc:
-                error = exc
-                log.debug("Mock execution error: %s", exc, exc_info=exc)
-                return ExecutionResult(stdout=buffer.getvalue(), value=value, error=error)
+                return code_to_run, [], False, exc
 
-        if resolver:
-            await _ensure_literal_gvars(code_to_run, resolver)
-            await _ensure_nested_gvars(resolver)
-            await _ensure_nested_gvars(resolver)
+        parsed_template = copy.deepcopy(list(parsed))
+        self._set_ast_cache(code, code_to_run, parsed_template)
+        return code_to_run, copy.deepcopy(parsed_template), False, None
 
-        try:
-            interpreter._preflight()
-            value = self._exec_with_value(interpreter, parsed)
-        except BaseException as exc:  # draconic raises BaseException subclasses
-            error = exc
-            log.debug("Mock execution error: %s", exc, exc_info=exc)
-        return ExecutionResult(stdout=buffer.getvalue(), value=value, error=error)
+    def _get_ast_cache(self, code: str) -> tuple[str, list[Any]] | None:
+        if not self._enable_ast_cache:
+            return None
+        cached = self._ast_cache.get(code)
+        if cached is None:
+            return None
+        self._ast_cache.move_to_end(code)
+        return cached
+
+    def _set_ast_cache(self, cache_key: str, code_to_run: str, parsed_template: list[Any]) -> None:
+        if not self._enable_ast_cache:
+            return
+        self._ast_cache[cache_key] = (code_to_run, parsed_template)
+        self._ast_cache.move_to_end(cache_key)
+        while len(self._ast_cache) > _EXECUTOR_AST_CACHE_SIZE:
+            self._ast_cache.popitem(last=False)
 
     def _build_builtins(
         self,

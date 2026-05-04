@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -9,11 +11,13 @@ import yaml
 
 from avrae_ls.runtime import argparser as avrae_argparser
 from avrae_ls.runtime.alias_preview import render_alias_command, simulate_command
-from avrae_ls.runtime.context import ContextBuilder
+from avrae_ls.runtime.context import ContextBuilder, ContextData
 from avrae_ls.runtime.runtime import MockExecutor
 from avrae_ls.config import VarSources
 
 MISSING_VALUE = "<missing>"
+
+log = logging.getLogger(__name__)
 
 
 class AliasTestError(Exception):
@@ -129,25 +133,70 @@ def parse_alias_tests(path: Path) -> list[AliasTestCase]:
 async def run_alias_tests(
     cases: Iterable[AliasTestCase], builder: ContextBuilder, executor: MockExecutor
 ) -> list[AliasTestResult]:
+    case_list = list(cases)
+    alias_sources: dict[Path, str] = {}
+    alias_errors: dict[Path, str] = {}
+
+    source_started = time.perf_counter()
+    for alias_path in {case.alias_path for case in case_list}:
+        try:
+            alias_sources[alias_path] = alias_path.read_text()
+        except OSError as exc:
+            alias_errors[alias_path] = f"Failed to read alias file {alias_path}: {exc}"
+    log_elapsed = (time.perf_counter() - source_started) * 1000
+    if alias_sources:
+        log.debug(
+            "Loaded %d alias source file(s) for tests in %.2fms",
+            len(alias_sources),
+            log_elapsed,
+        )
+
+    baseline = builder.build_baseline()
     results: list[AliasTestResult] = []
-    for case in cases:
-        results.append(await run_alias_test(case, builder, executor))
+    for case in case_list:
+        error = alias_errors.get(case.alias_path)
+        if error is not None:
+            results.append(AliasTestResult(case=case, passed=False, actual=None, stdout="", error=error))
+            continue
+        results.append(
+            await run_alias_test(
+                case,
+                builder,
+                executor,
+                alias_source=alias_sources.get(case.alias_path),
+                base_context=baseline,
+            )
+        )
     return results
 
 
-async def run_alias_test(case: AliasTestCase, builder: ContextBuilder, executor: MockExecutor) -> AliasTestResult:
-    try:
-        alias_source = case.alias_path.read_text()
-    except OSError as exc:
-        return AliasTestResult(
-            case=case,
-            passed=False,
-            actual=None,
-            stdout="",
-            error=f"Failed to read alias file {case.alias_path}: {exc}",
+async def run_alias_test(
+    case: AliasTestCase,
+    builder: ContextBuilder,
+    executor: MockExecutor,
+    *,
+    alias_source: str | None = None,
+    base_context: ContextData | None = None,
+) -> AliasTestResult:
+    if alias_source is None:
+        source_started = time.perf_counter()
+        try:
+            alias_source = case.alias_path.read_text()
+        except OSError as exc:
+            return AliasTestResult(
+                case=case,
+                passed=False,
+                actual=None,
+                stdout="",
+                error=f"Failed to read alias file {case.alias_path}: {exc}",
+            )
+        log.debug(
+            "Loaded alias source %s in %.2fms",
+            case.alias_path,
+            (time.perf_counter() - source_started) * 1000,
         )
 
-    ctx_data = builder.build()
+    ctx_data = builder.build_from_baseline(base_context)
     if case.var_overrides:
         ctx_data.vars = ctx_data.vars.merge(VarSources.from_data(case.var_overrides))
     if case.character_overrides:
