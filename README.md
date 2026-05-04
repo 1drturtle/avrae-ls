@@ -37,7 +37,7 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
   ```
   !my-alias -b example args
   ---
-  expected text or number
+  expected text or numbers
   ```
 - Gvar tests use `.gvar-test` or `.gvartest` next to a sibling `.gvar` file with the same stem. The test body runs after an implicit `using(...)` import of that module under a sanitized local binding name.
   ```
