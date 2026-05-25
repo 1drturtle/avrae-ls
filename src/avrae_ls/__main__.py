@@ -5,6 +5,7 @@ import asyncio
 import difflib
 import logging
 import sys
+from collections import UserList, UserString
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -324,8 +325,28 @@ def _relative_to_workspace(path: Path, workspace_root: Path) -> str:
 def _format_value(value: Any) -> str:
     if value is None:
         return "None"
+    value = _yaml_safe_value(value)
     if isinstance(value, (dict, list)):
         return (yaml.safe_dump(value, sort_keys=False) or "").strip()
+    return str(value)
+
+
+def _yaml_safe_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {_yaml_safe_key(k): _yaml_safe_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, UserList)):
+        return [_yaml_safe_value(v) for v in value]
+    if isinstance(value, set):
+        return [_yaml_safe_value(v) for v in value]
+    if isinstance(value, UserString):
+        return str(value)
+    return value
+
+
+def _yaml_safe_key(value: Any) -> Any:
+    value = _yaml_safe_value(value)
+    if isinstance(value, (str, int, float, bool, type(None))):
+        return value
     return str(value)
 
 

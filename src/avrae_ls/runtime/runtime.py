@@ -471,6 +471,10 @@ class MockExecutor:
         def _get_gvar(address: str):
             if resolver is None:
                 return None
+            value = resolver.get_local(address)
+            if value is not None:
+                return value
+            resolver.ensure_blocking(str(address))
             return resolver.get_local(address)
 
         def _get_svar(name: str, default=None):

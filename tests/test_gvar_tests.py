@@ -1,6 +1,6 @@
 import pytest
 
-from avrae_ls.__main__ import _run_alias_tests
+from avrae_ls.__main__ import _format_value, _run_alias_tests
 from avrae_ls.config import AvraeLSConfig
 from avrae_ls.runtime.context import ContextBuilder
 from avrae_ls.runtime.runtime import MockExecutor
@@ -405,3 +405,15 @@ def test_run_tests_shares_gvar_cache_between_alias_and_gvar_suites(monkeypatch, 
 
     assert exit_code == 0
     assert calls == ["remote"]
+
+
+@pytest.mark.asyncio
+async def test_format_value_handles_draconic_safe_dict(tmp_path):
+    config = AvraeLSConfig.default(tmp_path)
+    executor = MockExecutor(config.service)
+    ctx = ContextBuilder(config).build()
+
+    result = await executor.run("return {'items': [{'name': 'Smith'}]}", ctx)
+
+    assert result.error is None
+    assert _format_value(result.value) == "items:\n- name: Smith"

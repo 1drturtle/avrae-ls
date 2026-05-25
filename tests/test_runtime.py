@@ -591,6 +591,32 @@ async def test_using_fallback_fetches_missing_module(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_get_gvar_fallback_fetches_dynamic_address(monkeypatch, tmp_path):
+    cfg = AvraeLSConfig.default(tmp_path)
+    cfg.enable_gvar_fetch = True
+    cfg.service.token = "token"
+    resolver = GVarResolver(cfg)
+    executor = MockExecutor(cfg.service)
+    ctx = _ctx()
+
+    resolver.seed({"outer": 'addr = "data"\nvalue = load_yaml(get_gvar(addr))'})
+
+    def fake_ensure_blocking(key: str) -> bool:
+        if key == "data":
+            resolver.seed({"data": "answer: 42"})
+            return True
+        return False
+
+    monkeypatch.setattr(resolver, "ensure_blocking", fake_ensure_blocking)
+
+    result = await executor.run('using(outer="outer")\nreturn outer.value.answer', ctx, resolver)
+
+    assert result.error is None
+    assert result.value == 42
+    assert resolver.get_local("data") == "answer: 42"
+
+
+@pytest.mark.asyncio
 async def test_verify_signature_does_not_retry(monkeypatch, tmp_path):
     calls: list[str] = []
 
