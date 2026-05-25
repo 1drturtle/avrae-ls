@@ -63,3 +63,37 @@ def test_load_config_missing_env_warns(tmp_path: Path):
     assert any("MISSING_TOKEN" in warning for warning in warnings)
     assert cfg.service.base_url == AvraeServiceConfig.base_url
     assert cfg.service.token is None
+
+
+def test_load_config_profiles_overlay_builtin_defaults(tmp_path: Path):
+    _write_config(
+        tmp_path,
+        {
+            "profiles": {
+                "default": {
+                    "character": {
+                        "name": "John Test",
+                    },
+                },
+                "gm": {
+                    "ctx": {
+                        "prefix": ";",
+                    },
+                },
+            },
+            "defaultProfile": "gm",
+        },
+    )
+
+    cfg, warnings = load_config(tmp_path)
+
+    assert warnings == []
+    default_profile = cfg.profiles["default"]
+    assert default_profile.character["name"] == "John Test"
+    assert default_profile.character["stats"]["strength"] == 16
+    assert default_profile.character["csettings"]["color"] == 10027008
+    assert default_profile.ctx["author"]["display_name"] == "Aelar Wyn"
+
+    gm_profile = cfg.profiles["gm"]
+    assert gm_profile.ctx["prefix"] == ";"
+    assert gm_profile.ctx["author"]["display_name"] == "Aelar Wyn"

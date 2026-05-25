@@ -256,7 +256,7 @@ class AvraeLSConfig:
             "passive_perception": 15,
             "speed": 30,
             "class_levels": {"Fighter": 3, "Rogue": 2},
-            "csettings": {"compact_coins": False},
+            "csettings": {"compact_coins": False, "color": 10027008},
         }
 
         me_combatant = {
@@ -410,6 +410,17 @@ def _coerce_optional_str(value: Any) -> str | None:
     return value_str if value_str.strip() else None
 
 
+def _merge_mapping(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        base_value = merged.get(key)
+        if isinstance(base_value, Mapping) and isinstance(value, Mapping):
+            merged[key] = _merge_mapping(base_value, value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def load_config(
     workspace_root: Path, *, default_enable_gvar_fetch: bool = False
 ) -> Tuple[AvraeLSConfig, Iterable[str]]:
@@ -458,16 +469,20 @@ def load_config(
         if isinstance(file_path, str)
     )
 
+    base = AvraeLSConfig.default(workspace_root)
+    base_profile = base.profiles[base.default_profile]
+
     profiles: Dict[str, ContextProfile] = {}
     raw_profiles = raw.get("profiles") or {}
     for name, data in raw_profiles.items():
+        source_profile = base.profiles.get(name, base_profile)
         profiles[name] = ContextProfile(
             name=name,
-            ctx=dict(data.get("ctx") or {}),
-            combat=dict(data.get("combat") or {}),
-            character=dict(data.get("character") or {}),
-            vars=VarSources.from_data(data.get("vars")),
-            description=str(data.get("description") or ""),
+            ctx=_merge_mapping(source_profile.ctx, data.get("ctx") or {}),
+            combat=_merge_mapping(source_profile.combat, data.get("combat") or {}),
+            character=_merge_mapping(source_profile.character, data.get("character") or {}),
+            vars=source_profile.vars.merge(VarSources.from_data(data.get("vars"))),
+            description=str(data.get("description") or source_profile.description),
         )
 
     default_profile = str(raw.get("defaultProfile") or "default")
@@ -476,7 +491,6 @@ def load_config(
         default_profile = next(iter(profiles))
 
     if not profiles:
-        base = AvraeLSConfig.default(workspace_root)
         profiles = base.profiles
         default_profile = base.default_profile
 
