@@ -9,6 +9,7 @@ from typing import Any, Iterable, Sequence
 from avrae_ls.runtime import argparser as avrae_argparser
 from avrae_ls.runtime.alias_preview import render_alias_command, simulate_command
 from avrae_ls.runtime.context import ContextBuilder, ContextData
+from avrae_ls.runtime.errors import format_runtime_error
 from avrae_ls.runtime.runtime import MockExecutor
 from avrae_ls.config import VarSources
 from avrae_ls.testing._common import (
@@ -237,7 +238,7 @@ async def run_alias_test(
             passed=False,
             actual=None,
             stdout=rendered.stdout,
-            error=str(rendered.error),
+            error=format_runtime_error(rendered.error),
             error_line=rendered.error_line,
             error_col=rendered.error_col,
         )
@@ -280,6 +281,8 @@ async def run_alias_test(
         embed=embed_dict,
         details=details,
     )
+
+
 def _split_command(command: str, path: Path) -> list[str]:
     try:
         tokens = avrae_argparser.argsplit(command)
@@ -307,6 +310,8 @@ def _resolve_alias_path(path: Path, alias_name: str) -> Path:
     raise AliasTestError(
         f"Could not find alias file for '{alias_name}'. Checked: {', '.join(str(base_dir / c) for c in candidates)}"
     )
+
+
 def _alias_candidates(path: Path, alias_name: str) -> Sequence[str]:
     base = path.stem.removeprefix("test-") or alias_name
     names = [alias_name]

@@ -13,7 +13,13 @@ import yaml
 
 from lsprotocol import types
 
-from avrae_ls.testing.alias_tests import AliasTestError, AliasTestResult, discover_test_files, parse_alias_tests, run_alias_tests
+from avrae_ls.testing.alias_tests import (
+    AliasTestError,
+    AliasTestResult,
+    discover_test_files,
+    parse_alias_tests,
+    run_alias_tests,
+)
 from avrae_ls.testing._common import diff_mismatched_parts
 from avrae_ls.testing.gvar_tests import GVarTestError, GVarTestResult, parse_gvar_tests, run_gvar_tests
 from avrae_ls.config import AvraeLSConfig, CONFIG_FILENAME, load_config

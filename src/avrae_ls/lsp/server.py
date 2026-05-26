@@ -17,7 +17,8 @@ from avrae_ls.runtime.context import ContextBuilder
 from avrae_ls.analysis.diagnostics import DiagnosticProvider
 from avrae_ls.runtime.runtime import MockExecutor
 from avrae_ls.runtime.alias_preview import render_alias_command, simulate_command
-from avrae_ls.analysis.parser import is_alias_module_path
+from avrae_ls.runtime.errors import format_runtime_error, runtime_error_details
+from avrae_ls.analysis.parser import DRACONIC_RE, INLINE_DRACONIC_RE, is_alias_module_path
 from avrae_ls.analysis.source_context import build_source_context, code_for_position
 from avrae_ls.lsp.signature_help import load_signatures, signature_help_for_code
 from avrae_ls.lsp.completions import gather_suggestions, completion_items_for_position, hover_for_position
@@ -322,7 +323,9 @@ async def run_alias(server: AvraeLanguageServer, *args: Any):
         "commandName": preview.command_name,
     }
     if rendered.error:
-        response["error"] = _format_runtime_error(rendered.error)
+        details = runtime_error_details(rendered.error)
+        response["error"] = details.message
+        response["errorDetails"] = details.to_dict()
     if preview.validation_error:
         response["validationError"] = preview.validation_error
     if preview.embed:
@@ -392,18 +395,27 @@ async def _publish_diagnostics(
     )
 
 
-def _format_runtime_error(error: BaseException) -> str:
-    if isinstance(error, draconic.DraconicException):
-        return error.msg
-    return str(error)
-
-
 def _runtime_diagnostic_with_source(error: BaseException, level: str, source: str | None) -> types.Diagnostic:
     severity = LEVEL_TO_SEVERITY.get(level.lower(), types.DiagnosticSeverity.Error)
-    if source and hasattr(error, "module"):
-        rng = _find_using_range(source, getattr(error, "module", None))
+    details = runtime_error_details(error)
+    if source:
+        rng = _runtime_node_range_in_source(error, source, details.import_chain[0] if details.import_chain else None)
         if rng:
-            return types.Diagnostic(message=str(error), range=rng, severity=severity, source="avrae-ls-runtime")
+            return types.Diagnostic(
+                message=details.message,
+                range=rng,
+                severity=severity,
+                source="avrae-ls-runtime",
+            )
+    if source and details.import_chain:
+        rng = _find_using_range_in_source(source, details.import_chain[0])
+        if rng:
+            return types.Diagnostic(
+                message=details.message,
+                range=rng,
+                severity=severity,
+                source="avrae-ls-runtime",
+            )
     if isinstance(error, draconic.DraconicSyntaxError):
         rng = types.Range(
             start=types.Position(line=max((error.lineno or 1) - 1, 0), character=max((error.offset or 1) - 1, 0)),
@@ -412,7 +424,7 @@ def _runtime_diagnostic_with_source(error: BaseException, level: str, source: st
                 character=max(((error.end_offset or error.offset or 1) - 1), 0),
             ),
         )
-        message = error.msg
+        message = format_runtime_error(error)
     elif hasattr(error, "node"):
         node = getattr(error, "node")
         rng = types.Range(
@@ -424,14 +436,109 @@ def _runtime_diagnostic_with_source(error: BaseException, level: str, source: st
                 character=max(getattr(node, "end_col_offset", getattr(node, "col_offset", 0) + 1), 0),
             ),
         )
-        message = getattr(error, "msg", str(error))
+        message = format_runtime_error(error)
     else:
         rng = types.Range(
             start=types.Position(line=0, character=0),
             end=types.Position(line=0, character=1),
         )
-        message = str(error)
+        message = format_runtime_error(error)
     return types.Diagnostic(message=message, range=rng, severity=severity, source="avrae-ls-runtime")
+
+
+def _runtime_node_range_in_source(
+    error: BaseException, source: str, imported_module: str | None = None
+) -> types.Range | None:
+    node = getattr(error, "node", None)
+    if node is None:
+        return None
+    if _node_is_using_import_for_module(node, imported_module):
+        return None
+    rng = _range_from_ast_node(node)
+    if rng is None:
+        return None
+
+    blocks = _raw_draconic_block_offsets(source)
+    if not blocks:
+        return rng
+    if len(blocks) == 1:
+        line_offset, char_offset, _ = blocks[0]
+        return _shift_range(rng, line_offset, char_offset)
+    for line_offset, char_offset, line_count in blocks:
+        if rng.start.line < line_count:
+            return _shift_range(rng, line_offset, char_offset)
+    return None
+
+
+def _node_is_using_import_for_module(node: Any, module: str | None) -> bool:
+    if not module:
+        return False
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name) or node.func.id != "using":
+        return False
+    for kw in node.keywords:
+        if kw.arg and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+            if kw.value.value == module:
+                return True
+    return False
+
+
+def _raw_draconic_block_offsets(source: str) -> list[tuple[int, int, int]]:
+    matches: list[tuple[int, int, int, int]] = []
+    for match in DRACONIC_RE.finditer(source):
+        matches.append(_raw_block_offset(source, match))
+    for match in INLINE_DRACONIC_RE.finditer(source):
+        matches.append(_raw_block_offset(source, match))
+    matches.sort(key=lambda item: item[0])
+    return [(line_offset, char_offset, line_count) for _, line_offset, char_offset, line_count in matches]
+
+
+def _raw_block_offset(source: str, match: Any) -> tuple[int, int, int, int]:
+    raw = match.group(1)
+    prefix = source[: match.start(1)]
+    line_offset = prefix.count("\n")
+    last_nl = prefix.rfind("\n")
+    char_offset = match.start(1) - (last_nl + 1 if last_nl != -1 else 0)
+    line_count = raw.count("\n") + 1 if raw else 1
+    return match.start(), line_offset, char_offset, line_count
+
+
+def _range_from_ast_node(node: Any) -> types.Range | None:
+    lineno = getattr(node, "lineno", None)
+    col_offset = getattr(node, "col_offset", None)
+    if not isinstance(lineno, int) or not isinstance(col_offset, int):
+        return None
+    end_lineno = getattr(node, "end_lineno", lineno)
+    end_col_offset = getattr(node, "end_col_offset", col_offset + 1)
+    if not isinstance(end_lineno, int):
+        end_lineno = lineno
+    if not isinstance(end_col_offset, int):
+        end_col_offset = col_offset + 1
+    return types.Range(
+        start=types.Position(line=max(lineno - 1, 0), character=max(col_offset, 0)),
+        end=types.Position(line=max(end_lineno - 1, 0), character=max(end_col_offset, col_offset + 1)),
+    )
+
+
+def _find_using_range_in_source(source: str, module: str | None) -> types.Range | None:
+    rng = _find_using_range(source, module)
+    if rng is not None:
+        return rng
+
+    source_ctx = build_source_context(source, False)
+    for block in source_ctx.blocks:
+        rng = _find_using_range(block.code, module)
+        if rng is not None:
+            return _shift_range(rng, block.line_offset, block.char_offset)
+    return None
+
+
+def _shift_range(rng: types.Range, line_offset: int, char_offset: int) -> types.Range:
+    def _shift_position(position: types.Position) -> types.Position:
+        line = position.line + line_offset
+        character = position.character + char_offset if position.line == 0 else position.character
+        return types.Position(line=line, character=character)
+
+    return types.Range(start=_shift_position(rng.start), end=_shift_position(rng.end))
 
 
 def _find_using_range(source: str, module: str | None) -> types.Range | None:

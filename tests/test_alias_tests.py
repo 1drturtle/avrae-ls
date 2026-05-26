@@ -323,8 +323,8 @@ async def test_alias_tests_character_override_makes_character_truthy(tmp_path):
         "!alias haschar echo <drac2>\n"
         "ch = character()\n"
         "if not ch:\n"
-        "  return \"bad output\"\n"
-        "return \"good output\"\n"
+        '  return "bad output"\n'
+        'return "good output"\n'
         "</drac2>"
     )
     test_path = tmp_path / "test-haschar.alias-test"

@@ -16,7 +16,7 @@ def test_argument_parsing_percent_all_uses_raw_args():
 
 
 def test_argument_parsing_amp_index_escapes_quotes():
-    rendered = apply_argument_parsing('echo &1&', ['say "hi"'], raw_args='say "hi"')
+    rendered = apply_argument_parsing("echo &1&", ['say "hi"'], raw_args='say "hi"')
     assert rendered == 'echo say \\"hi\\"'
 
 

@@ -9,6 +9,7 @@ from typing import Any, Iterable
 from avrae_ls.config import VarSources
 from avrae_ls.gvar_utils import sanitize_gvar_binding
 from avrae_ls.runtime.context import ContextBuilder, ContextData
+from avrae_ls.runtime.errors import format_runtime_error, runtime_error_details
 from avrae_ls.runtime.runtime import MockExecutor, ModuleExecutionError
 from avrae_ls.testing._common import (
     deep_merge_dicts,
@@ -219,12 +220,16 @@ async def run_gvar_test(
     )
     if result.error:
         error_line, error_col = _map_error_position(result.error, wrapper_lines=1)
+        details = runtime_error_details(result.error)
+        if details.module_line is not None:
+            error_line = details.module_line
+            error_col = details.module_col
         return GVarTestResult(
             case=case,
             passed=False,
             actual=result.value,
             stdout=result.stdout,
-            error=str(result.error),
+            error=format_runtime_error(result.error),
             error_line=error_line,
             error_col=error_col,
         )

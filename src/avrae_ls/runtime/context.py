@@ -199,7 +199,9 @@ class ContextBuilder:
 
         if me is not None:
             combat["me"] = me
-            if not any((c is me) or _same_combatant(c, me) for c in combatants) and not any(_matches_author(c) for c in combatants):
+            if not any((c is me) or _same_combatant(c, me) for c in combatants) and not any(
+                _matches_author(c) for c in combatants
+            ):
                 combatants.insert(0, me)
             combat["combatants"] = combatants
             if "current" not in combat or combat.get("current") is None:

@@ -198,7 +198,7 @@ function activate(context) {
 
   function renderPreview(result) {
     if (!previewPanel) return;
-    const { stdout = "", result: value, error, validationError, state } = result;
+    const { stdout = "", result: value, error, errorDetails, validationError, state } = result;
     const renderedResult = value === undefined
       ? `<div class="empty">No result</div>`
       : `<pre class="result code-block">${escapeHtml(JSON.stringify(value, null, 2))}</pre>`;
@@ -207,7 +207,7 @@ function activate(context) {
       : `<div class="empty">No stdout</div>`;
     const diagnostics = [
       validationError ? `Embed preview warning: ${validationError}` : null,
-      error ? `Runtime error: ${error}` : null,
+      error ? renderDiagnosticText(error, errorDetails) : null,
     ].filter(Boolean);
     const renderedDiagnostics = diagnostics.length
       ? diagnostics.map((d, idx) => `<pre class="diagnostic code-block" data-line="${idx === 0 ? 0 : ""}">${escapeHtml(d)}</pre>`).join("")
@@ -322,6 +322,28 @@ pre { white-space: pre-wrap; word-break: break-word; }
   </script>
 </body>
 </html>`;
+  }
+
+  function renderDiagnosticText(error, details) {
+    if (!details || typeof details !== "object") {
+      return `Runtime error: ${error}`;
+    }
+    const lines = [`Runtime error: ${details.message || error}`];
+    if (Array.isArray(details.import_chain) && details.import_chain.length) {
+      lines.push(`Module chain: ${details.import_chain.join(" -> ")}`);
+    } else if (details.module) {
+      lines.push(`Module: ${details.module}`);
+    }
+    if (details.module_line) {
+      const location = details.module_col
+        ? `line ${details.module_line}, col ${details.module_col}`
+        : `line ${details.module_line}`;
+      lines.push(`Module location: ${location}`);
+    }
+    if (details.cause && details.cause !== details.message) {
+      lines.push(`Cause: ${details.cause}`);
+    }
+    return lines.join("\n");
   }
 
   function escapeHtml(str) {

@@ -24,6 +24,7 @@ from avrae_ls.runtime.context import ContextData, GVarResolver
 from avrae_ls.config import AvraeServiceConfig, VarSources
 from avrae_ls.runtime.api import AliasContextAPI, CharacterAPI, SimpleCombat, SimpleRollResult
 from avrae_ls.runtime import argparser as avrae_argparser
+from avrae_ls.runtime.errors import attach_runtime_error_context
 
 _VERIFY_SIGNATURE_TIMEOUT = 5.0
 _VERIFY_SIGNATURE_RETRIES = 0
@@ -229,17 +230,6 @@ def _parse_coin_args_re(args: str) -> _CoinsArgs:
 
 
 def _parse_coins(args: str, include_total: bool = True):
-    try:
-        from avrae.aliasing.api.functions import parse_coins as avrae_parse_coins
-    except Exception:
-        avrae_parse_coins = None
-
-    if avrae_parse_coins:
-        try:
-            return avrae_parse_coins(str(args), include_total=include_total)
-        except Exception:
-            pass
-
     coin_args = _parse_coin_args(str(args))
     parsed: dict[str, int | float] = {
         "pp": coin_args.pp,
@@ -343,6 +333,7 @@ class MockExecutor:
         resolver = gvar_resolver
         interpreter_ref: dict[str, draconic.DraconicInterpreter | None] = {"interpreter": None}
         runtime_character: CharacterAPI | None = None
+        module_sources: dict[str, str] = {}
 
         def _character_provider() -> CharacterAPI:
             nonlocal runtime_character
@@ -365,6 +356,7 @@ class MockExecutor:
             interpreter_ref=interpreter_ref,
             import_cache=import_cache,
             import_stack=import_stack,
+            module_sources=module_sources,
         )
         interpreter = draconic.DraconicInterpreter(
             builtins=builtins,
@@ -392,6 +384,7 @@ class MockExecutor:
             value = self._exec_with_value(interpreter, parsed)
         except BaseException as exc:  # draconic raises BaseException subclasses
             error = exc
+            attach_runtime_error_context(error, module_sources=module_sources)
             log.debug("Mock execution error: %s", exc, exc_info=exc)
         exec_elapsed_ms = (time.perf_counter() - exec_started) * 1000
         log.debug(
@@ -454,12 +447,15 @@ class MockExecutor:
         interpreter_ref: Dict[str, draconic.DraconicInterpreter | None] | None = None,
         import_cache: Dict[str, SimpleNamespace] | None = None,
         import_stack: list[str] | None = None,
+        module_sources: dict[str, str] | None = None,
     ) -> Dict[str, Any]:
         builtins = dict(self._base_builtins)
         var_store = ctx_data.vars
         interpreter_ref = interpreter_ref or {"interpreter": None}
         import_cache = import_cache or {}
         import_stack = import_stack or []
+        if module_sources is None:
+            module_sources = {}
         service_cfg = self._service_config
         verify_cache_sig: str | None = None
         verify_cache_result: Dict[str, Any] | None = None
@@ -549,6 +545,7 @@ class MockExecutor:
                 if mod_contents is None:
                     raise ModuleNotFoundError(f"No gvar named {addr!r}")
 
+                module_sources[addr] = str(mod_contents)
                 old_names = getattr(interp, "_names", {})
                 depth_increased = False
                 try:

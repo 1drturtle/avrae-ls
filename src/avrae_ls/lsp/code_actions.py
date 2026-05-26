@@ -185,6 +185,8 @@ def _line_indent(source: str, line: int, default: int = 0) -> int:
         if match:
             return len(match.group(1))
     return default
+
+
 def _kind_allowed(kind: str, only: Sequence[str]) -> bool:
     if not only:
         return True
