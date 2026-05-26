@@ -92,6 +92,19 @@ async def test_nested_module_function_error_details_use_module_sources(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_module_missing_attribute_error_uses_local_binding_name(tmp_path: Path):
+    resolver = _resolver(tmp_path, {"abc123": "value = 1"})
+
+    result = await MockExecutor().run('using(local_mod="abc123")\nlocal_mod.missing', _ctx(), resolver)
+
+    assert result.error is not None
+    details = runtime_error_details(result.error)
+    assert details.kind == "runtime"
+    assert details.message == "Module 'local_mod' has no attribute 'missing'"
+    assert "SimpleNamespace" not in details.message
+
+
+@pytest.mark.asyncio
 async def test_circular_import_error_details(tmp_path: Path):
     resolver = _resolver(
         tmp_path,

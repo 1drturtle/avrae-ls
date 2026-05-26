@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import ast
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -253,9 +254,43 @@ def _error_line_col(error: BaseException) -> tuple[int | None, int | None]:
 
 
 def _error_message(error: BaseException) -> str:
+    module_attr_message = _module_attribute_error_message(error)
+    if module_attr_message is not None:
+        return module_attr_message
     if isinstance(error, draconic.DraconicException):
         return str(error.msg)
     return str(error)
+
+
+def _module_attribute_error_message(error: BaseException) -> str | None:
+    if not isinstance(error, draconic.NotDefined):
+        return None
+    message = str(error.msg)
+    attr_match = re.fullmatch(r"'SimpleNamespace' object has no attribute (.+)", message)
+    if attr_match is None:
+        return None
+
+    node = getattr(error, "node", None)
+    if not isinstance(node, ast.Attribute):
+        return None
+
+    module_name = _module_attribute_base_name(node.value, getattr(error, "expr", None))
+    if module_name is None:
+        return None
+    return f"Module '{module_name}' has no attribute '{attr_match.group(1)}'"
+
+
+def _module_attribute_base_name(node: ast.AST, expr: Any) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(expr, str):
+        segment = ast.get_source_segment(expr, node)
+        if segment:
+            return segment
+    try:
+        return ast.unparse(node)
+    except Exception:
+        return None
 
 
 def _kind_for_error(error: BaseException) -> str:
