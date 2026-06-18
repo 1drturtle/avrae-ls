@@ -17,7 +17,7 @@ from avrae_ls.testing._common import (
     dict_matches,
     merge_new_gvars_into_suite_cache,
     parse_expected_value,
-    parse_metadata_mapping,
+    parse_test_metadata,
     scalar_matches,
 )
 
@@ -34,6 +34,7 @@ class AliasTestCase:
     alias_path: Path
     alias_name: str
     name: str | None
+    profile: str | None
     args: list[str]
     expected_raw: str
     expected: Any
@@ -120,24 +121,22 @@ def parse_alias_tests(path: Path) -> list[AliasTestCase]:
         alias_path = _resolve_alias_path(path, alias_name)
         expected = parse_expected_value(expected_raw)
         try:
-            meta = parse_metadata_mapping(meta_raw, str(path))
+            meta = parse_test_metadata(meta_raw, str(path))
         except ValueError as exc:
             raise AliasTestError(str(exc)) from exc
-        name = meta.get("name") if isinstance(meta, dict) else None
-        var_overrides = meta.get("vars") if isinstance(meta, dict) else None
-        character_overrides = meta.get("character") if isinstance(meta, dict) else None
 
         cases.append(
             AliasTestCase(
                 path=path,
                 alias_path=alias_path,
                 alias_name=alias_name,
-                name=name,
+                name=meta.name,
+                profile=meta.profile,
                 args=args,
                 expected_raw=expected_raw,
                 expected=expected,
-                var_overrides=var_overrides if isinstance(var_overrides, dict) else None,
-                character_overrides=character_overrides if isinstance(character_overrides, dict) else None,
+                var_overrides=meta.var_overrides,
+                character_overrides=meta.character_overrides,
             )
         )
     return cases
@@ -168,14 +167,20 @@ async def run_alias_tests(
             log_elapsed,
         )
 
-    baseline = builder.build_baseline()
-    shared_gvar_cache = suite_gvar_cache if suite_gvar_cache is not None else dict(baseline.vars.gvars)
+    baselines: dict[str | None, ContextData] = {}
+    default_baseline = builder.build_baseline()
+    baselines[None] = default_baseline
+    shared_gvar_cache = suite_gvar_cache if suite_gvar_cache is not None else dict(default_baseline.vars.gvars)
     results: list[AliasTestResult] = []
     for case in case_list:
         error = alias_errors.get(case.alias_path)
         if error is not None:
             results.append(AliasTestResult(case=case, passed=False, actual=None, stdout="", error=error))
             continue
+        baseline = baselines.get(case.profile)
+        if baseline is None:
+            baseline = builder.build_baseline(case.profile)
+            baselines[case.profile] = baseline
         results.append(
             await run_alias_test(
                 case,
@@ -216,6 +221,8 @@ async def run_alias_test(
             (time.perf_counter() - source_started) * 1000,
         )
 
+    if base_context is None:
+        base_context = builder.build_baseline(case.profile)
     ctx_data = builder.build_from_baseline(base_context)
     if case.var_overrides:
         ctx_data.vars = ctx_data.vars.merge(VarSources.from_data(case.var_overrides))

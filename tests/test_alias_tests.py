@@ -2,9 +2,23 @@ import pytest
 
 from avrae_ls.testing.alias_tests import AliasTestError, parse_alias_tests, run_alias_tests
 from avrae_ls.__main__ import _run_alias_tests
-from avrae_ls.config import AvraeLSConfig
+from avrae_ls.config import AvraeLSConfig, ContextProfile, VarSources
 from avrae_ls.runtime.context import ContextBuilder
 from avrae_ls.runtime.runtime import MockExecutor
+
+
+def _profile_like(config: AvraeLSConfig, name: str, *, character_name: str, hp: str | None = None) -> ContextProfile:
+    vars = config.profiles["default"].vars
+    if hp is not None:
+        vars = vars.merge(VarSources(cvars={"hp": hp}))
+    return ContextProfile(
+        name=name,
+        ctx=dict(config.profiles["default"].ctx),
+        combat=dict(config.profiles["default"].combat),
+        character={**config.profiles["default"].character, "name": character_name},
+        vars=vars,
+        description="",
+    )
 
 
 @pytest.mark.asyncio
@@ -191,6 +205,18 @@ def test_parse_alias_tests_support_avrae_quote_pairs(tmp_path):
     assert case.args == ["hello world"]
 
 
+def test_parse_alias_tests_reads_profile_metadata(tmp_path):
+    alias_path = tmp_path / "who.alias"
+    alias_path.write_text("!alias who echo hi")
+    test_path = tmp_path / "test-who.alias-test"
+    test_path.write_text("!who\n---\nhi\n---\nname: who-test\nprofile: gm\n")
+
+    case = parse_alias_tests(test_path)[0]
+
+    assert case.name == "who-test"
+    assert case.profile == "gm"
+
+
 @pytest.mark.asyncio
 async def test_alias_tests_support_regex_expected(tmp_path):
     alias_path = tmp_path / "greet.alias"
@@ -358,6 +384,48 @@ async def test_alias_tests_allow_metadata_vars_override(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_alias_tests_support_per_case_profiles(tmp_path):
+    alias_path = tmp_path / "who.alias"
+    alias_path.write_text("!alias who echo <drac2>return character().name</drac2>")
+    test_path = tmp_path / "test-who.alias-test"
+    test_path.write_text("!who\n---\nDefault Hero\n---\nprofile: default\n\n!who\n---\nGM Hero\n---\nprofile: gm\n")
+
+    config = AvraeLSConfig.default(tmp_path)
+    config.profiles["default"].character["name"] = "Default Hero"
+    config.profiles["gm"] = _profile_like(config, "gm", character_name="GM Hero")
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    cases = parse_alias_tests(test_path)
+    results = await run_alias_tests(cases, builder, executor)
+
+    assert len(results) == 2
+    assert all(result.passed for result in results)
+    assert [result.actual for result in results] == ["Default Hero", "GM Hero"]
+
+
+@pytest.mark.asyncio
+async def test_alias_tests_profile_overrides_still_apply_on_selected_profile(tmp_path):
+    alias_path = tmp_path / "who.alias"
+    alias_path.write_text("!alias who echo <drac2>return f\"{character().name}|{get('hp')}\"</drac2>")
+    test_path = tmp_path / "test-who.alias-test"
+    test_path.write_text(
+        "!who\n---\nTester|99\n---\nprofile: gm\nvars:\n  cvars:\n    hp: 99\ncharacter:\n  name: Tester\n"
+    )
+
+    config = AvraeLSConfig.default(tmp_path)
+    config.profiles["gm"] = _profile_like(config, "gm", character_name="GM Hero", hp="7")
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    case = parse_alias_tests(test_path)[0]
+    result = (await run_alias_tests([case], builder, executor))[0]
+
+    assert case.profile == "gm"
+    assert result.passed
+
+
+@pytest.mark.asyncio
 async def test_alias_tests_reuse_nested_gvar_fetches_across_cases(monkeypatch, tmp_path):
     alias_path = tmp_path / "outer.alias"
     alias_path.write_text('!alias outer echo <drac2>using(mod="remote")\nreturn mod.answer</drac2>')
@@ -367,6 +435,56 @@ async def test_alias_tests_reuse_nested_gvar_fetches_across_cases(monkeypatch, t
     config = AvraeLSConfig.default(tmp_path)
     config.enable_gvar_fetch = True
     config.service.token = "token"
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    calls: list[str] = []
+
+    class DummyResponse:
+        status_code = 200
+
+        def __init__(self, key: str):
+            self.key = key
+
+        def json(self):
+            return {"value": "answer = 42\n"}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            calls.append(url.rsplit("/", 1)[-1])
+            return DummyResponse(calls[-1])
+
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
+
+    cases = parse_alias_tests(test_path)
+    results = await run_alias_tests(cases, builder, executor)
+
+    assert all(result.passed for result in results)
+    assert calls == ["remote"]
+
+
+@pytest.mark.asyncio
+async def test_alias_tests_reuse_nested_gvar_fetches_across_profiles(monkeypatch, tmp_path):
+    alias_path = tmp_path / "outer.alias"
+    alias_path.write_text('!alias outer echo <drac2>using(mod="remote")\nreturn mod.answer</drac2>')
+    test_path = tmp_path / "outer.alias-test"
+    test_path.write_text('!outer\n---\n"42"\n---\nprofile: default\n\n!outer\n---\n"42"\n---\nprofile: gm\n')
+
+    config = AvraeLSConfig.default(tmp_path)
+    config.enable_gvar_fetch = True
+    config.service.token = "token"
+    config.profiles["gm"] = _profile_like(
+        config, "gm", character_name=str(config.profiles["default"].character["name"])
+    )
     builder = ContextBuilder(config)
     executor = MockExecutor(config.service)
 

@@ -1,10 +1,24 @@
 import pytest
 
 from avrae_ls.__main__ import _format_value, _run_alias_tests
-from avrae_ls.config import AvraeLSConfig
+from avrae_ls.config import AvraeLSConfig, ContextProfile, VarSources
 from avrae_ls.runtime.context import ContextBuilder
 from avrae_ls.runtime.runtime import MockExecutor
 from avrae_ls.testing.gvar_tests import GVarTestError, parse_gvar_tests, run_gvar_tests
+
+
+def _profile_like(config: AvraeLSConfig, name: str, *, character_name: str, hp: str | None = None) -> ContextProfile:
+    vars = config.profiles["default"].vars
+    if hp is not None:
+        vars = vars.merge(VarSources(cvars={"hp": hp}))
+    return ContextProfile(
+        name=name,
+        ctx=dict(config.profiles["default"].ctx),
+        combat=dict(config.profiles["default"].combat),
+        character={**config.profiles["default"].character, "name": character_name},
+        vars=vars,
+        description="",
+    )
 
 
 @pytest.mark.asyncio
@@ -43,6 +57,18 @@ def test_parse_gvar_test_requires_sibling_gvar_file(tmp_path):
 
     with pytest.raises(GVarTestError):
         parse_gvar_tests(test_path)
+
+
+def test_parse_gvar_tests_reads_profile_metadata(tmp_path):
+    gvar_path = tmp_path / "ctxcheck.gvar"
+    gvar_path.write_text("answer = 5\n")
+    test_path = tmp_path / "ctxcheck.gvar-test"
+    test_path.write_text("return ctxcheck.answer\n---\n5\n---\nname: ctxcheck\nprofile: gm\n")
+
+    case = parse_gvar_tests(test_path)[0]
+
+    assert case.name == "ctxcheck"
+    assert case.profile == "gm"
 
 
 @pytest.mark.asyncio
@@ -154,6 +180,50 @@ async def test_gvar_tests_allow_metadata_overrides(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_gvar_tests_support_per_case_profiles(tmp_path):
+    gvar_path = tmp_path / "ctxcheck.gvar"
+    gvar_path.write_text("answer = character().name\n")
+    test_path = tmp_path / "ctxcheck.gvar-test"
+    test_path.write_text(
+        "return ctxcheck.answer\n---\nDefault Hero\n---\nprofile: default\n\nreturn ctxcheck.answer\n---\nGM Hero\n---\nprofile: gm\n"
+    )
+
+    config = AvraeLSConfig.default(tmp_path)
+    config.profiles["default"].character["name"] = "Default Hero"
+    config.profiles["gm"] = _profile_like(config, "gm", character_name="GM Hero")
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    cases = parse_gvar_tests(test_path)
+    results = await run_gvar_tests(cases, builder, executor)
+
+    assert len(results) == 2
+    assert all(result.passed for result in results)
+    assert [result.actual for result in results] == ["Default Hero", "GM Hero"]
+
+
+@pytest.mark.asyncio
+async def test_gvar_tests_profile_overrides_still_apply_on_selected_profile(tmp_path):
+    gvar_path = tmp_path / "ctxcheck.gvar"
+    gvar_path.write_text("answer = [character().name, get('hp')]\n")
+    test_path = tmp_path / "ctxcheck.gvar-test"
+    test_path.write_text(
+        'return ctxcheck.answer\n---\n- Tester\n- "99"\n---\nprofile: gm\nvars:\n  cvars:\n    hp: 99\ncharacter:\n  name: Tester\n'
+    )
+
+    config = AvraeLSConfig.default(tmp_path)
+    config.profiles["gm"] = _profile_like(config, "gm", character_name="GM Hero", hp="7")
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    case = parse_gvar_tests(test_path)[0]
+    result = (await run_gvar_tests([case], builder, executor))[0]
+
+    assert case.profile == "gm"
+    assert result.passed
+
+
+@pytest.mark.asyncio
 async def test_gvar_tests_support_nested_using_dependencies(tmp_path):
     gvar_path = tmp_path / "main.gvar"
     gvar_path.write_text('using(inner="inner")\nvalue = inner.answer\n')
@@ -180,6 +250,55 @@ async def test_gvar_tests_reuse_nested_gvar_fetches_across_cases(monkeypatch, tm
     config = AvraeLSConfig.default(tmp_path)
     config.enable_gvar_fetch = True
     config.service.token = "token"
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    calls: list[str] = []
+
+    class DummyResponse:
+        status_code = 200
+
+        def json(self):
+            return {"value": "answer = 42\n"}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            calls.append(url.rsplit("/", 1)[-1])
+            return DummyResponse()
+
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
+
+    cases = parse_gvar_tests(test_path)
+    results = await run_gvar_tests(cases, builder, executor)
+
+    assert all(result.passed for result in results)
+    assert calls == ["inner"]
+
+
+@pytest.mark.asyncio
+async def test_gvar_tests_reuse_nested_gvar_fetches_across_profiles(monkeypatch, tmp_path):
+    gvar_path = tmp_path / "main.gvar"
+    gvar_path.write_text('using(inner="inner")\nvalue = inner.answer\n')
+    test_path = tmp_path / "main.gvar-test"
+    test_path.write_text(
+        "return main.value\n---\n42\n---\nprofile: default\n\nreturn main.value\n---\n42\n---\nprofile: gm\n"
+    )
+
+    config = AvraeLSConfig.default(tmp_path)
+    config.enable_gvar_fetch = True
+    config.service.token = "token"
+    config.profiles["gm"] = _profile_like(
+        config, "gm", character_name=str(config.profiles["default"].character["name"])
+    )
     builder = ContextBuilder(config)
     executor = MockExecutor(config.service)
 
@@ -358,17 +477,20 @@ def test_run_tests_output_formats_module_errors(tmp_path, capsys):
 
 
 def test_run_tests_shares_gvar_cache_between_alias_and_gvar_suites(monkeypatch, tmp_path):
-    (tmp_path / ".avraels.json").write_text('{"enableGvarFetch": true, "avraeService": {"token": "token"}}')
+    (tmp_path / ".avraels.json").write_text(
+        '{"enableGvarFetch": true, "avraeService": {"token": "token"}, '
+        '"profiles": {"default": {"character": {"name": "Default Hero"}}, "gm": {"character": {"name": "GM Hero"}}}}'
+    )
 
     alias_path = tmp_path / "outer.alias"
     alias_path.write_text('!alias outer echo <drac2>using(mod="remote")\nreturn mod.answer</drac2>')
     alias_test_path = tmp_path / "outer.alias-test"
-    alias_test_path.write_text('!outer\n---\n"42"\n')
+    alias_test_path.write_text('!outer\n---\n"42"\n---\nprofile: gm\n')
 
     gvar_path = tmp_path / "main.gvar"
     gvar_path.write_text('using(inner="remote")\nvalue = inner.answer\n')
     gvar_test_path = tmp_path / "main.gvar-test"
-    gvar_test_path.write_text("return main.value\n---\n42\n")
+    gvar_test_path.write_text("return main.value\n---\n42\n---\nprofile: default\n")
 
     calls: list[str] = []
 

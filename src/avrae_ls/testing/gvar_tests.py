@@ -15,7 +15,7 @@ from avrae_ls.testing._common import (
     deep_merge_dicts,
     merge_new_gvars_into_suite_cache,
     parse_expected_value,
-    parse_metadata_mapping,
+    parse_test_metadata,
     value_matches,
 )
 
@@ -33,6 +33,7 @@ class GVarTestCase:
     gvar_name: str
     binding_name: str
     name: str | None
+    profile: str | None
     body: str
     expected_raw: str
     expected: Any
@@ -102,16 +103,13 @@ def parse_gvar_tests(path: Path) -> list[GVarTestCase]:
         meta_raw = "\n".join(meta_lines)
         expected = parse_expected_value(expected_raw)
         try:
-            meta = parse_metadata_mapping(meta_raw, str(path))
+            meta = parse_test_metadata(meta_raw, str(path))
         except ValueError as exc:
             raise GVarTestError(str(exc)) from exc
 
         gvar_path = _resolve_gvar_path(path)
         gvar_name = gvar_path.stem
         binding_name = sanitize_gvar_binding(gvar_name)
-        name = meta.get("name") if isinstance(meta, dict) else None
-        var_overrides = meta.get("vars") if isinstance(meta, dict) else None
-        character_overrides = meta.get("character") if isinstance(meta, dict) else None
 
         cases.append(
             GVarTestCase(
@@ -119,12 +117,13 @@ def parse_gvar_tests(path: Path) -> list[GVarTestCase]:
                 gvar_path=gvar_path,
                 gvar_name=gvar_name,
                 binding_name=binding_name,
-                name=name,
+                name=meta.name,
+                profile=meta.profile,
                 body=body,
                 expected_raw=expected_raw,
                 expected=expected,
-                var_overrides=var_overrides if isinstance(var_overrides, dict) else None,
-                character_overrides=character_overrides if isinstance(character_overrides, dict) else None,
+                var_overrides=meta.var_overrides,
+                character_overrides=meta.character_overrides,
             )
         )
     return cases
@@ -151,14 +150,20 @@ async def run_gvar_tests(
     if gvar_sources:
         log.debug("Loaded %d gvar source file(s) for tests in %.2fms", len(gvar_sources), log_elapsed)
 
-    baseline = builder.build_baseline()
-    shared_gvar_cache = suite_gvar_cache if suite_gvar_cache is not None else dict(baseline.vars.gvars)
+    baselines: dict[str | None, ContextData] = {}
+    default_baseline = builder.build_baseline()
+    baselines[None] = default_baseline
+    shared_gvar_cache = suite_gvar_cache if suite_gvar_cache is not None else dict(default_baseline.vars.gvars)
     results: list[GVarTestResult] = []
     for case in case_list:
         error = gvar_errors.get(case.gvar_path)
         if error is not None:
             results.append(GVarTestResult(case=case, passed=False, actual=None, stdout="", error=error))
             continue
+        baseline = baselines.get(case.profile)
+        if baseline is None:
+            baseline = builder.build_baseline(case.profile)
+            baselines[case.profile] = baseline
         results.append(
             await run_gvar_test(
                 case,
@@ -195,6 +200,8 @@ async def run_gvar_test(
             )
         log.debug("Loaded gvar source %s in %.2fms", case.gvar_path, (time.perf_counter() - source_started) * 1000)
 
+    if base_context is None:
+        base_context = builder.build_baseline(case.profile)
     ctx_data = builder.build_from_baseline(base_context)
     if case.var_overrides:
         ctx_data.vars = ctx_data.vars.merge(VarSources.from_data(case.var_overrides))

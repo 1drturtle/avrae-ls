@@ -154,6 +154,7 @@ Hello, /A.*/!
 Add a second `---` to include metadata. Supported keys:
 
 - `name`: label for reporting.
+- `profile`: which `.avraels.json` profile to run this specific test against.
 - `vars`: per-test overrides for `cvars`, `uvars`, `svars`, and `gvars`.
 - `character`: values merged into the mock character.
 
@@ -163,6 +164,7 @@ Add a second `---` to include metadata. Supported keys:
 /\d+ damage/
 ---
 name: "simple-damage"
+profile: "gm"
 vars:
   cvars:
     hp: 12
@@ -222,6 +224,7 @@ return helpers.other
 Gvar tests support the same metadata mapping as alias tests:
 
 - `name`
+- `profile`
 - `vars`
 - `character`
 
@@ -241,6 +244,7 @@ vars:
 - Expected output cannot include a line that starts with `!` because that marks the next test. If you need to check a `!` line, use a single-line string like `"line1\n!line2"` or a regex like `re:^!`.
 - If you want a number treated as text, wrap it in quotes (YAML reads bare numbers as numbers).
 - The mock context comes from `.avraels.json` and any var files you configure there (including gvar `{ filePath: ... }` entries). Metadata `vars` and `character` values are merged on top of those defaults for the test only.
+- `profile` applies per test case. If omitted, tests use the workspace default profile. Metadata `vars` and `character` still apply as per-test overlays on top of the selected profile.
 - Each test runs independently, so one test does not affect another.
 - Alias tests compare against the alias result or embed preview, not stdout.
 - Gvar tests compare against the direct test-body result, not stdout.

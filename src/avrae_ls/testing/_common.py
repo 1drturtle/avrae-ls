@@ -3,11 +3,20 @@ from __future__ import annotations
 import re
 from collections import UserList
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import yaml
 
 MISSING_VALUE = "<missing>"
+
+
+@dataclass(frozen=True)
+class TestMetadata:
+    name: str | None = None
+    profile: str | None = None
+    var_overrides: dict[str, Any] | None = None
+    character_overrides: dict[str, Any] | None = None
 
 
 def parse_expected_value(raw: str) -> Any:
@@ -19,6 +28,22 @@ def parse_metadata_mapping(raw: str, path_label: str) -> dict[str, Any] | None:
     if meta is not None and not isinstance(meta, dict):
         raise ValueError(f"{path_label} metadata after second '---' must be a mapping")
     return meta
+
+
+def parse_test_metadata(raw: str, path_label: str) -> TestMetadata:
+    meta = parse_metadata_mapping(raw, path_label)
+    if not isinstance(meta, dict):
+        return TestMetadata()
+    name = meta.get("name")
+    profile = meta.get("profile")
+    var_overrides = meta.get("vars")
+    character_overrides = meta.get("character")
+    return TestMetadata(
+        name=str(name) if name is not None else None,
+        profile=str(profile) if profile is not None else None,
+        var_overrides=var_overrides if isinstance(var_overrides, dict) else None,
+        character_overrides=character_overrides if isinstance(character_overrides, dict) else None,
+    )
 
 
 def deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
