@@ -1,7 +1,9 @@
+from pathlib import Path
+
 import pytest
 
 from avrae_ls.testing.alias_tests import AliasTestError, parse_alias_tests, run_alias_tests
-from avrae_ls.__main__ import _run_alias_tests
+from avrae_ls.__main__ import _run_alias_tests, main
 from avrae_ls.config import AvraeLSConfig, ContextProfile, VarSources
 from avrae_ls.runtime.context import ContextBuilder
 from avrae_ls.runtime.runtime import MockExecutor
@@ -123,7 +125,7 @@ def test_run_tests_output_uses_rendered_command(tmp_path, capsys):
     test_path = tmp_path / "test-speak.alias-test"
     test_path.write_text("!speak\n---\nsay hello 4\n")
 
-    exit_code = _run_alias_tests(tmp_path)
+    exit_code = _run_alias_tests([tmp_path])
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -138,7 +140,7 @@ def test_run_tests_output_skips_diff_on_execution_error(tmp_path, capsys):
     test_path = tmp_path / "test-boom.alias-test"
     test_path.write_text("!boom\n---\nshould not compare\n")
 
-    exit_code = _run_alias_tests(tmp_path)
+    exit_code = _run_alias_tests([tmp_path])
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -147,6 +149,54 @@ def test_run_tests_output_skips_diff_on_execution_error(tmp_path, capsys):
     assert "Expected:" not in captured.out
     assert "Actual:" not in captured.out
     assert "Diff:" not in captured.out
+
+
+def test_main_run_tests_defaults_to_current_directory(monkeypatch):
+    recorded: list[list[Path]] = []
+
+    def fake_run_tests(targets, **kwargs):
+        recorded.append(list(targets))
+        return 0
+
+    monkeypatch.setattr("avrae_ls.__main__._run_alias_tests", fake_run_tests)
+
+    with pytest.raises(SystemExit) as exc:
+        main(["--run-tests"])
+
+    assert exc.value.code == 0
+    assert recorded == [[Path(".")]]
+
+
+def test_main_run_tests_accepts_repeated_flags(monkeypatch):
+    recorded: list[list[Path]] = []
+
+    def fake_run_tests(targets, **kwargs):
+        recorded.append(list(targets))
+        return 0
+
+    monkeypatch.setattr("avrae_ls.__main__._run_alias_tests", fake_run_tests)
+
+    with pytest.raises(SystemExit) as exc:
+        main(["--run-tests", "one", "--run-tests", "two"])
+
+    assert exc.value.code == 0
+    assert recorded == [[Path("one"), Path("two")]]
+
+
+def test_main_run_tests_supports_mixed_default_and_explicit_flags(monkeypatch):
+    recorded: list[list[Path]] = []
+
+    def fake_run_tests(targets, **kwargs):
+        recorded.append(list(targets))
+        return 0
+
+    monkeypatch.setattr("avrae_ls.__main__._run_alias_tests", fake_run_tests)
+
+    with pytest.raises(SystemExit) as exc:
+        main(["--run-tests", "--run-tests", "other_dir"])
+
+    assert exc.value.code == 0
+    assert recorded == [[Path("."), Path("other_dir")]]
 
 
 @pytest.mark.asyncio

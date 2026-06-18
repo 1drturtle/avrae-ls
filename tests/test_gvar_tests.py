@@ -453,7 +453,7 @@ def test_run_tests_discovers_alias_and_gvar_tests(tmp_path, capsys):
     gvar_test_path = tmp_path / "math.gvar-test"
     gvar_test_path.write_text("return math.answer\n---\n42\n")
 
-    exit_code = _run_alias_tests(tmp_path)
+    exit_code = _run_alias_tests([tmp_path])
     captured = capsys.readouterr()
 
     assert exit_code == 0
@@ -468,7 +468,7 @@ def test_run_tests_output_formats_module_errors(tmp_path, capsys):
     test_path = tmp_path / "broken.gvar-test"
     test_path.write_text("return broken.answer\n---\n1\n")
 
-    exit_code = _run_alias_tests(tmp_path)
+    exit_code = _run_alias_tests([tmp_path])
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -482,14 +482,18 @@ def test_run_tests_shares_gvar_cache_between_alias_and_gvar_suites(monkeypatch, 
         '"profiles": {"default": {"character": {"name": "Default Hero"}}, "gm": {"character": {"name": "GM Hero"}}}}'
     )
 
-    alias_path = tmp_path / "outer.alias"
+    alias_dir = tmp_path / "aliases"
+    alias_dir.mkdir()
+    alias_path = alias_dir / "outer.alias"
     alias_path.write_text('!alias outer echo <drac2>using(mod="remote")\nreturn mod.answer</drac2>')
-    alias_test_path = tmp_path / "outer.alias-test"
+    alias_test_path = alias_dir / "outer.alias-test"
     alias_test_path.write_text('!outer\n---\n"42"\n---\nprofile: gm\n')
 
-    gvar_path = tmp_path / "main.gvar"
+    gvar_dir = tmp_path / "gvars"
+    gvar_dir.mkdir()
+    gvar_path = gvar_dir / "main.gvar"
     gvar_path.write_text('using(inner="remote")\nvalue = inner.answer\n')
-    gvar_test_path = tmp_path / "main.gvar-test"
+    gvar_test_path = gvar_dir / "main.gvar-test"
     gvar_test_path.write_text("return main.value\n---\n42\n---\nprofile: default\n")
 
     calls: list[str] = []
@@ -516,10 +520,50 @@ def test_run_tests_shares_gvar_cache_between_alias_and_gvar_suites(monkeypatch, 
 
     monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
 
-    exit_code = _run_alias_tests(tmp_path)
+    exit_code = _run_alias_tests([alias_dir, gvar_dir])
 
     assert exit_code == 0
     assert calls == ["remote"]
+
+
+def test_run_tests_accept_repeated_targets_without_duplicate_execution(tmp_path, capsys):
+    (tmp_path / ".avraels.json").write_text('{"enableGvarFetch": false}')
+    alias_path = tmp_path / "hello.alias"
+    alias_path.write_text("!alias hello echo hi")
+    test_path = tmp_path / "hello.alias-test"
+    test_path.write_text("!hello\n---\nhi\n")
+
+    exit_code = _run_alias_tests([tmp_path, tmp_path])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out.count("[PASS] hello.alias-test (alias: hello)") == 1
+
+
+def test_run_tests_deduplicates_overlapping_roots_and_file_targets(tmp_path, capsys):
+    (tmp_path / ".avraels.json").write_text('{"enableGvarFetch": false}')
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    alias_path = nested / "hello.alias"
+    alias_path.write_text("!alias hello echo hi")
+    test_path = nested / "hello.alias-test"
+    test_path.write_text("!hello\n---\nhi\n")
+
+    exit_code = _run_alias_tests([tmp_path, nested, test_path])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out.count("[PASS] nested/hello.alias-test (alias: hello)") == 1
+
+
+def test_run_tests_returns_two_when_any_target_is_missing(tmp_path, capsys):
+    missing = tmp_path / "missing"
+
+    exit_code = _run_alias_tests([tmp_path, missing])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert f"Test path not found: {missing}" in captured.err
 
 
 @pytest.mark.asyncio

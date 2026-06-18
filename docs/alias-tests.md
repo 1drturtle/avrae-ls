@@ -27,6 +27,7 @@ You can run tests in a folder or point to a single test file:
 avrae-ls --run-tests .
 avrae-ls --run-tests path/to/greet.alias-test
 avrae-ls --run-tests path/to/helpers.gvar-test
+avrae-ls --run-tests aliases --run-tests shared-tests
 ```
 
 Example layout:
@@ -297,6 +298,7 @@ Use the file path:
 ```bash
 avrae-ls --run-tests path/to/greet.alias-test
 avrae-ls --run-tests path/to/helpers.gvar-test
+avrae-ls --run-tests path/to/greet.alias-test --run-tests path/to/helpers.gvar-test
 ```
 
 **Can I put many tests in one file?**

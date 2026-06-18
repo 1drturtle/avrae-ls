@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import difflib
 import logging
+import os
 import sys
 from collections import UserList, UserString
 from pathlib import Path
@@ -46,7 +47,8 @@ def main(argv: list[str] | None = None) -> None:
         metavar="PATH",
         nargs="?",
         const=".",
-        help="Run alias and gvar tests in PATH (defaults to current directory)",
+        action="append",
+        help="Run alias and gvar tests in PATH; repeat the flag to add scan roots (defaults to current directory)",
     )
     parser.add_argument(
         "--silent-gvar-fetch",
@@ -71,7 +73,7 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("--run-tests cannot be combined with --analyze")
         sys.exit(
             _run_alias_tests(
-                Path(args.run_tests),
+                [Path(target) for target in args.run_tests],
                 token_override=args.token,
                 base_url_override=args.base_url,
                 silent_gvar_fetch=args.silent_gvar_fetch,
@@ -142,19 +144,22 @@ def _run_analysis(
 
 
 def _run_alias_tests(
-    target: Path,
+    targets: Sequence[Path],
     *,
     token_override: str | None = None,
     base_url_override: str | None = None,
     silent_gvar_fetch: bool = False,
 ) -> int:
-    if not target.exists():
-        print(f"Test path not found: {target}", file=sys.stderr)
+    target_list = list(targets)
+    missing_targets = [target for target in target_list if not target.exists()]
+    if missing_targets:
+        for target in missing_targets:
+            print(f"Test path not found: {target}", file=sys.stderr)
         return 2
 
-    workspace_root = _discover_workspace_root(target)
+    workspace_root = _discover_workspace_root_for_targets(target_list)
     log = logging.getLogger(__name__)
-    log.info("Running alias and gvar tests in %s (workspace root: %s)", target, workspace_root)
+    log.info("Running alias and gvar tests in %s (workspace root: %s)", target_list, workspace_root)
 
     config = _load_runtime_config(
         workspace_root,
@@ -168,7 +173,7 @@ def _run_alias_tests(
     executor = MockExecutor(config.service)
     shared_gvar_cache = dict(builder.build_baseline().vars.gvars)
 
-    test_files = discover_test_files(target, patterns=RUN_TEST_PATTERNS)
+    test_files = _discover_test_files_for_targets(target_list, patterns=RUN_TEST_PATTERNS)
     alias_cases = []
     gvar_cases = []
     parse_errors: list[str] = []
@@ -185,7 +190,7 @@ def _run_alias_tests(
         for err in parse_errors:
             print(err, file=sys.stderr)
     if not alias_cases and not gvar_cases:
-        print(f"No alias or gvar tests found under {target}")
+        print(f"No alias or gvar tests found under {_format_test_targets(target_list)}")
         return 1 if parse_errors else 0
 
     alias_results = (
@@ -362,6 +367,33 @@ def _discover_workspace_root(target: Path) -> Path:
         if (folder / CONFIG_FILENAME).exists():
             return folder
     return current
+
+
+def _discover_workspace_root_for_targets(targets: Sequence[Path]) -> Path:
+    if not targets:
+        return Path(".")
+    roots = [target if target.is_dir() else target.parent for target in targets]
+    common = Path(os.path.commonpath([str(root) for root in roots]))
+    for folder in [common, *common.parents]:
+        if (folder / CONFIG_FILENAME).exists():
+            return folder
+    return common
+
+
+def _discover_test_files_for_targets(targets: Sequence[Path], *, patterns: Sequence[str]) -> list[Path]:
+    files: list[Path] = []
+    seen: set[Path] = set()
+    for target in targets:
+        for test_file in discover_test_files(target, patterns=patterns):
+            if test_file in seen:
+                continue
+            seen.add(test_file)
+            files.append(test_file)
+    return files
+
+
+def _format_test_targets(targets: Sequence[Path]) -> str:
+    return ", ".join(str(target) for target in targets)
 
 
 def _is_gvar_test_file(path: Path) -> bool:

@@ -32,7 +32,7 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
 
 ## Alias and gvar tests
 
-- `avrae-ls --run-tests [path]` discovers both alias tests and gvar tests and exits non-zero on failures.
+- `avrae-ls --run-tests [path]` discovers both alias tests and gvar tests and exits non-zero on failures; repeat `--run-tests` to add more scan roots.
 - Alias tests use `.alias-test` or `.aliastest` next to your alias file. Each test starts with an invocation, followed by `---` and the expected result; you can stack multiple tests in one file by repeating this pattern (optional metadata after a second `---` per test).
   ```
   !my-alias -b example args
