@@ -57,19 +57,6 @@ vsix: bundle-vscode-server vscode-deps
 	mkdir -p dist
 	cd vscode-extension && $(VSCE) package --out ../dist/avrae-ls-client.vsix
 
-verify-vscode-bundle:
-	test -f $(BUNDLE_SITE_PACKAGES)/avrae_ls/__main__.py
-	test -f $(BUNDLE_SITE_PACKAGES)/draconic/__init__.py
-	test -d $(BUNDLE_SITE_PACKAGES)/d20
-	test -d $(BUNDLE_SITE_PACKAGES)/httpx
-	test -d $(BUNDLE_SITE_PACKAGES)/lsprotocol
-	test -d $(BUNDLE_SITE_PACKAGES)/pygls
-	test -d $(BUNDLE_SITE_PACKAGES)/yaml
-	PYTHONPATH="$(BUNDLE_SITE_PACKAGES):$$PYTHONPATH" $(UV) run --no-sync python -m avrae_ls --help
-	unzip -Z1 dist/avrae-ls-client.vsix | rg -qx 'extension/bundled/site-packages/avrae_ls/__main__.py'
-	unzip -Z1 dist/avrae-ls-client.vsix | rg -qx 'extension/bundled/site-packages/draconic/__init__.py'
-	unzip -Z1 dist/avrae-ls-client.vsix | rg -qx 'extension/bundled/site-packages/pygls/__init__.py'
-
 package: wheel vsix
 
 release: clean

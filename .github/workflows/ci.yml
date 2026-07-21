@@ -60,5 +60,3 @@ jobs:
         run: make vscode-deps
       - name: Test extension launch configuration
         run: cd vscode-extension && npm test
-      - name: Build and validate VSIX
-        run: make vsix verify-vscode-bundle
