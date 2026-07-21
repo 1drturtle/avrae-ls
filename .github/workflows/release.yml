@@ -34,16 +34,9 @@ jobs:
           cache: "npm"
           cache-dependency-path: vscode-extension/package-lock.json
 
-      - name: Install VS Code extension deps
-        working-directory: vscode-extension
-        run: npm ci
-
-      - name: Build VS Code extension (VSIX)
+      - name: Build VS Code extension and bundled server (VSIX)
         id: build_vsce
-        working-directory: vscode-extension
-        run: |
-          npm run bundle
-          npx vsce package --out ../dist/avrae-ls-client.vsix
+        run: make vsix
 
       - name: Create draft release
         if: ${{ success() && steps.build_python.outcome == 'success' &&

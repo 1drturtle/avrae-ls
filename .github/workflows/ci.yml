@@ -5,11 +5,25 @@ on:
     paths:
       - "src/**"
       - "tests/**"
+      - "vscode-extension/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"
+      - ".gitignore"
+      - ".github/workflows/**"
   push:
     branches: [main]
     paths:
       - "src/**"
       - "tests/**"
+      - "vscode-extension/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"
+      - ".gitignore"
+      - ".github/workflows/**"
 
 jobs:
   test:
@@ -26,3 +40,25 @@ jobs:
         run: uv run ruff check .
       - name: Tests
         run: uv run pytest --cov=src
+
+  vscode-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: vscode-extension/package-lock.json
+      - name: Install Python runtime dependencies
+        run: uv sync --no-dev
+      - name: Install VS Code extension dependencies
+        run: make vscode-deps
+      - name: Test extension launch configuration
+        run: cd vscode-extension && npm test
+      - name: Build and validate VSIX
+        run: make vsix verify-vscode-bundle

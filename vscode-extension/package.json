@@ -2,7 +2,7 @@
   "name": "avrae-ls-client",
   "displayName": "Avrae Draconic Alias Language Server",
   "description": "VS Code client for avrae-ls (draconic alias diagnostics and mock execution).",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -95,6 +95,12 @@
     "configuration": {
       "title": "Avrae LS",
       "properties": {
+        "avraeLS.server.path": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "markdownDescription": "Path to an alternate `avrae-ls` executable. Leave empty to run the language server bundled with this extension using Python 3.11 or newer."
+        },
         "avraeLS.trace.server": {
           "type": "string",
           "enum": [
@@ -111,6 +117,7 @@
   "scripts": {
     "build": "npm run bundle",
     "bundle": "npx esbuild ./extension.js --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js",
+    "test": "node --test test/*.test.js",
     "lint": "echo \"No lint configured\""
   },
   "devDependencies": {

@@ -4,15 +4,18 @@
 
 Language Server Protocol (LSP) implementation targeting Avrae-style draconic aliases. It provides syntax/semantic diagnostics, a mocked execution command, and a thin configuration layer driven by a workspace `.avraels.json` file. Credit to Avrae team for all code yoinked!
 
-## Install (released package)
+## VS Code extension
 
-- CLI/server via `uv tool` (preferred): `uv tool install avrae-ls` then `avrae-ls --help` to see stdio/TCP options (same as `python -m avrae_ls`). The VS Code extension uses this invocation by default. The draconic interpreter is vendored, so no Git deps are needed.
-
-## VS Code extension (released)
-
-- Install from VSIX: download `avrae-ls-client.vsix` from the GitHub releases page, then in VS Code run “Extensions: Install from VSIX” and select the file.
+- Install from VSIX: download `avrae-ls-client.vsix` from the GitHub releases page, then in VS Code run “Extensions: Install from VSIX” and select the file. The VSIX already contains `avrae-ls` and its runtime dependencies; no `uv`, `pip`, or separate server installation is required.
+- Python 3.11 or newer must be available as `python3` on macOS/Linux or `python` on Windows. The extension uses that interpreter only to run its bundled server package.
+- To use a development or custom server instead, set `avraeLS.server.path` to the absolute path of an `avrae-ls` executable (for example, a virtual environment's `bin/avrae-ls`). A configured path takes precedence over the bundled server.
 - Open your alias workspace; commands like `Avrae: Show Alias Preview` and `Avrae: Run Alias` will be available.
 - Files ending with `.alias-module` are treated as full-file draconic modules under the `avrae-module` language id (no `<drac2>` tags; mock run/preview commands stay tied to `.alias` files).
+
+## Install Just the LSP
+
+- CLI/server via `uv tool` (preferred): `uv tool install avrae-ls` then `avrae-ls --help` to see stdio/TCP options (same as `python -m avrae_ls`).
+
 
 ## Developing locally
 

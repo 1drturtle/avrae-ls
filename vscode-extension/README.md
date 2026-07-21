@@ -1,6 +1,10 @@
 # Avrae/Draconic Language Server Extension
 
-VS Code client for `avrae-ls` that provides diagnostics, completion, and mock alias execution in the preview panel. Configure `.avraels.json` in your workspace (see the repo README) to supply tokens or local var files if you need gvar/import support.
+VS Code client for `avrae-ls` that provides diagnostics, completion, and mock alias execution in the preview panel. Released VSIX files include the `avrae-ls` Python package and all of its runtime dependencies, so installing the extension does not require a separate `uv`, `pip`, or `avrae-ls` installation.
+
+The bundled server requires Python 3.11 or newer: the extension starts `python3 -m avrae_ls` on macOS/Linux and `python -m avrae_ls` on Windows. If your Python executable is unavailable, or you want to run a development build, set `avraeLS.server.path` to the absolute path of an alternate `avrae-ls` executable. A configured path replaces the bundled launch entirely.
+
+Configure `.avraels.json` in your workspace (see the repo README) to supply tokens or local var files if you need gvar/import support.
 
 ## Mock vs. live Avrae caveats
 

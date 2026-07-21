@@ -1,0 +1,6 @@
+.gitignore
+.vscodeignore
+node_modules/**
+test/**
+extension.js
+server-launcher.js

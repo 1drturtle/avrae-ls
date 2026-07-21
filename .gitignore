@@ -210,3 +210,4 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python,linux,visualstudiocode
 vscode-extension/node_modules/*
 vscode-extension/dist/
+vscode-extension/bundled/

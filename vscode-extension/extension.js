@@ -1,6 +1,9 @@
 const vscode = require("vscode");
+const { execFile } = require("child_process");
+const { accessSync, constants } = require("fs");
 const path = require("path");
 const { LanguageClient, TransportKind, Executable } = require("vscode-languageclient/node");
+const { bundledSitePackages, isCompatiblePythonVersion, resolveServerLaunch } = require("./server-launcher");
 
 let client;
 let previewPanel;
@@ -8,11 +11,41 @@ let previewArgsState = "";
 let lastPreviewDocument = undefined;
 let dracPreviewDecoration;
 
-function activate(context) {
-  const serverCommand = "avrae-ls";
+async function activate(context) {
+  const configuredServerPath = vscode.workspace.getConfiguration("avraeLS").get("server.path", "");
+  const serverLaunch = resolveServerLaunch({
+    extensionPath: context.extensionPath,
+    overridePath: configuredServerPath,
+  });
+  if (!serverLaunch.usesBundledServer && !isExecutable(serverLaunch.command)) {
+    vscode.window.showErrorMessage(
+      `Avrae LS could not start the executable configured in avraeLS.server.path: ${serverLaunch.command}. Set it to an executable avrae-ls path, or clear the setting to use the bundled server.`
+    );
+    return;
+  }
+  if (serverLaunch.usesBundledServer) {
+    const bundledModule = path.join(bundledSitePackages(context.extensionPath), "avrae_ls", "__main__.py");
+    if (!isReadable(bundledModule)) {
+      vscode.window.showErrorMessage(
+        "Avrae LS could not find its bundled server files. Reinstall the extension, or set avraeLS.server.path to an alternate avrae-ls executable."
+      );
+      return;
+    }
+    const pythonVersion = await getPythonVersion(serverLaunch.command);
+    if (!isCompatiblePythonVersion(pythonVersion)) {
+      const foundVersion = pythonVersion ? `Found Python ${pythonVersion}.` : `Could not run ${serverLaunch.command}.`;
+      vscode.window.showErrorMessage(
+        `Avrae LS could not start its bundled server. ${foundVersion} Install Python 3.11 or newer, or set avraeLS.server.path to an alternate avrae-ls executable.`
+      );
+      return;
+    }
+  }
+
   /** @type {Executable} */
   const serverOptions = {
-    command: serverCommand,
+    command: serverLaunch.command,
+    args: serverLaunch.args,
+    options: serverLaunch.options,
     transport: TransportKind.stdio,
   };
 
@@ -465,6 +498,35 @@ pre { white-space: pre-wrap; word-break: break-word; }
       arguments: [payload],
     });
   }
+}
+
+function isExecutable(filePath) {
+  try {
+    accessSync(filePath, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isReadable(filePath) {
+  try {
+    accessSync(filePath, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getPythonVersion(command) {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      ["-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"],
+      { timeout: 5000, windowsHide: true },
+      (error, stdout) => resolve(error ? "" : stdout.trim())
+    );
+  });
 }
 
 function deactivate() {
