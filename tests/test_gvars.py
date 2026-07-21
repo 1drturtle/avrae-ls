@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from avrae_ls.config import AvraeLSConfig
-from avrae_ls.runtime.context import ContextBuilder, GVarResolver
+from avrae_ls.runtime.context import (
+    GVAR_SCRIPT_WRITABLE_KEY,
+    GVAR_VALUE_KEY,
+    ContextBuilder,
+    GVarResolver,
+)
 from avrae_ls.lsp.server import AvraeLanguageServer, refresh_gvars
 from avrae_ls.testing._common import merge_new_gvars_into_suite_cache
 
@@ -17,7 +22,8 @@ async def test_refresh_resets_and_seeds_without_fetch():
 
     snapshot = await resolver.refresh({"seed": "x"}, keys=["missing"])
 
-    assert snapshot.get("seed") == "x"
+    assert snapshot["seed"][GVAR_VALUE_KEY] == "x"
+    assert snapshot["seed"][GVAR_SCRIPT_WRITABLE_KEY] is False
     assert "old" not in snapshot
     # enable_gvar_fetch defaults to false, so missing key should not be added
     assert "missing" not in snapshot
@@ -64,11 +70,11 @@ def test_gvar_resolver_snapshot_and_load_snapshot_are_isolated():
     resolver.seed({"a": "1"})
 
     snapshot = resolver.snapshot()
-    snapshot["a"] = "mutated"
+    snapshot["a"][GVAR_VALUE_KEY] = "mutated"
     resolver.load_snapshot(snapshot)
 
     assert resolver.get_local("a") == "mutated"
-    assert resolver.snapshot() == {"a": "mutated"}
+    assert resolver.snapshot() == {"a": {GVAR_VALUE_KEY: "mutated", GVAR_SCRIPT_WRITABLE_KEY: False}}
 
 
 def test_merge_new_gvars_into_suite_cache_only_adds_missing_keys():
@@ -208,9 +214,9 @@ async def test_refresh_fetches_multiple_when_enabled(monkeypatch):
 
     snapshot = await resolver.refresh({"seed": "present"}, keys=["g1", "g2"])
 
-    assert snapshot["seed"] == "present"
-    assert snapshot["g1"] == "value:g1"
-    assert snapshot["g2"] == "value:g2"
+    assert snapshot["seed"] == {GVAR_VALUE_KEY: "present", GVAR_SCRIPT_WRITABLE_KEY: False}
+    assert snapshot["g1"] == {GVAR_VALUE_KEY: "value:g1", GVAR_SCRIPT_WRITABLE_KEY: False}
+    assert snapshot["g2"] == {GVAR_VALUE_KEY: "value:g2", GVAR_SCRIPT_WRITABLE_KEY: False}
     assert len(captured["urls"]) == 2
     assert captured["headers"] == [{"Authorization": "token"}, {"Authorization": "token"}]
 
@@ -233,8 +239,8 @@ def test_context_builder_loads_gvar_from_file_path(tmp_path: Path):
 
     ctx = builder.build()
 
-    assert ctx.vars.gvars["mod123"] == "answer = 42\n"
-    assert ctx.vars.gvars["mod456"] == "answer = 84\n"
+    assert ctx.vars.gvars["mod123"] == {GVAR_VALUE_KEY: "answer = 42\n", GVAR_SCRIPT_WRITABLE_KEY: False}
+    assert ctx.vars.gvars["mod456"] == {GVAR_VALUE_KEY: "answer = 84\n", GVAR_SCRIPT_WRITABLE_KEY: False}
     assert builder.gvar_resolver.get_local("mod123") == "answer = 42\n"
 
 
@@ -258,5 +264,67 @@ def test_context_builder_skips_missing_gvar_file_path(tmp_path: Path, caplog: py
         ctx = ContextBuilder(cfg).build()
 
     assert "mod123" not in ctx.vars.gvars
-    assert ctx.vars.gvars["inline"] == "return 1"
+    assert ctx.vars.gvars["inline"] == {GVAR_VALUE_KEY: "return 1", GVAR_SCRIPT_WRITABLE_KEY: False}
     assert "Gvar content file not found for 'mod123'" in caplog.text
+
+
+def test_context_builder_preserves_script_writable_on_gvar_entries(tmp_path: Path):
+    var_dir = tmp_path / "vars"
+    var_dir.mkdir()
+    gvar_file = var_dir / "mod.gvar"
+    gvar_file.write_text("answer = 42\n")
+    var_file = var_dir / "gvars.json"
+    var_file.write_text(
+        json.dumps(
+            {
+                "gvars": {
+                    "inline": {"value": "return 1", "scriptWritable": True},
+                    "file_backed": {"filePath": "mod.gvar", "scriptWritable": True},
+                }
+            }
+        )
+    )
+
+    cfg = AvraeLSConfig.default(tmp_path)
+    cfg.var_files = (var_file,)
+
+    ctx = ContextBuilder(cfg).build()
+
+    assert ctx.vars.gvars["inline"] == {GVAR_VALUE_KEY: "return 1", GVAR_SCRIPT_WRITABLE_KEY: True}
+    assert ctx.vars.gvars["file_backed"] == {GVAR_VALUE_KEY: "answer = 42\n", GVAR_SCRIPT_WRITABLE_KEY: True}
+
+
+@pytest.mark.asyncio
+async def test_remote_gvar_fetch_preserves_script_writable(monkeypatch):
+    cfg = AvraeLSConfig.default(Path("."))
+    cfg.enable_gvar_fetch = True
+    cfg.service.token = "token"
+    resolver = GVarResolver(cfg)
+
+    class DummyResponse:
+        status_code = 200
+
+        def json(self):
+            return {"value": "remote text", "script_writable": True}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            return DummyResponse()
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
+
+    assert await resolver.ensure("abc123") is True
+    assert resolver.get_local("abc123") == "remote text"
+    assert resolver.is_script_writable("abc123") is True

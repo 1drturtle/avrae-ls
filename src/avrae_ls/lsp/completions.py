@@ -229,7 +229,7 @@ def hover_for_position(
 
     gvars = resolver.snapshot()
     if word in gvars:
-        return _format_binding_hover(word, gvars[word], "gvar")
+        return _format_binding_hover(word, resolver.get_local(word), "gvar")
     return None
 
 

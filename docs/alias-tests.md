@@ -156,7 +156,7 @@ Add a second `---` to include metadata. Supported keys:
 
 - `name`: label for reporting.
 - `profile`: which `.avraels.json` profile to run this specific test against.
-- `vars`: per-test overrides for `cvars`, `uvars`, `svars`, and `gvars`.
+- `vars`: per-test overrides for `cvars`, `uvars`, `svars`, and `gvars`. Gvar overrides can use inline strings, `{ value: ... }`, or `{ filePath: ... }`, and may include `scriptWritable: true`.
 - `character`: values merged into the mock character.
 
 ```

@@ -9,6 +9,7 @@ import math
 import random
 import re
 import time
+import uuid
 from types import SimpleNamespace
 from collections import OrderedDict, UserList
 import yaml
@@ -20,7 +21,7 @@ import draconic
 import httpx
 from draconic.interpreter import _Break, _Continue, _Return
 
-from avrae_ls.runtime.context import ContextData, GVarResolver
+from avrae_ls.runtime.context import ContextData, GVarResolver, gvar_value
 from avrae_ls.config import AvraeServiceConfig, VarSources
 from avrae_ls.runtime.api import AliasContextAPI, CharacterAPI, SimpleCombat, SimpleRollResult
 from avrae_ls.runtime import argparser as avrae_argparser
@@ -30,6 +31,8 @@ _VERIFY_SIGNATURE_TIMEOUT = 5.0
 _VERIFY_SIGNATURE_RETRIES = 0
 _EXECUTOR_ENABLE_AST_CACHE = True
 _EXECUTOR_AST_CACHE_SIZE = 256
+_GVAR_SIZE_LIMIT = 100_000
+_GVAR_WRITES_PER_EXECUTION = 50
 
 
 # Minimal stand-in for Avrae's AliasException
@@ -303,6 +306,8 @@ class MockExecutor:
             "load_yaml",
             "dump_yaml",
             "get_gvar",
+            "set_gvar",
+            "create_gvar",
             "get_svar",
             "get_uvar",
             "get_uvars",
@@ -348,6 +353,7 @@ class MockExecutor:
 
         import_cache: dict[str, SimpleNamespace] = {}
         import_stack: list[str] = []
+        touched_gvars: set[str] = set()
         builtins = self._build_builtins(
             ctx_data,
             resolver,
@@ -357,6 +363,7 @@ class MockExecutor:
             import_cache=import_cache,
             import_stack=import_stack,
             module_sources=module_sources,
+            touched_gvars=touched_gvars,
         )
         interpreter = draconic.DraconicInterpreter(
             builtins=builtins,
@@ -375,7 +382,6 @@ class MockExecutor:
 
         if resolver:
             await _ensure_literal_gvars(code_to_run, resolver)
-            await _ensure_nested_gvars(resolver)
             await _ensure_nested_gvars(resolver)
 
         exec_started = time.perf_counter()
@@ -448,12 +454,14 @@ class MockExecutor:
         import_cache: Dict[str, SimpleNamespace] | None = None,
         import_stack: list[str] | None = None,
         module_sources: dict[str, str] | None = None,
+        touched_gvars: set[str] | None = None,
     ) -> Dict[str, Any]:
         builtins = dict(self._base_builtins)
         var_store = ctx_data.vars
         interpreter_ref = interpreter_ref or {"interpreter": None}
         import_cache = import_cache or {}
         import_stack = import_stack or []
+        touched_gvars = touched_gvars or set()
         if module_sources is None:
             module_sources = {}
         service_cfg = self._service_config
@@ -472,6 +480,46 @@ class MockExecutor:
                 return value
             resolver.ensure_blocking(str(address))
             return resolver.get_local(address)
+
+        def _charge_gvar_write(key: str) -> None:
+            key = str(key)
+            if key in touched_gvars:
+                return
+            if len(touched_gvars) >= _GVAR_WRITES_PER_EXECUTION:
+                raise avrae_argparser.InvalidArgument(
+                    f"Too many gvar writes in a single execution (limit {_GVAR_WRITES_PER_EXECUTION})."
+                )
+            touched_gvars.add(key)
+
+        def _set_gvar(address: str, value: Any):
+            if resolver is None:
+                raise avrae_argparser.InvalidArgument("Global variable not found.")
+            key = str(address)
+            record = resolver.get_record(key)
+            if record is None:
+                resolver.ensure_blocking(key)
+                record = resolver.get_record(key)
+            if record is None:
+                raise avrae_argparser.InvalidArgument("Global variable not found.")
+            if not resolver.is_script_writable(key):
+                raise avrae_argparser.InvalidArgument("This gvar is not writable by scripting.")
+            str_value = str(value)
+            if len(str_value) > _GVAR_SIZE_LIMIT:
+                raise avrae_argparser.InvalidArgument(f"Gvars must be shorter than {_GVAR_SIZE_LIMIT:,} characters.")
+            _charge_gvar_write(key)
+            resolver.set_value(key, str_value)
+            return None
+
+        def _create_gvar(value: Any, script_writable: bool = False):
+            if resolver is None:
+                raise avrae_argparser.InvalidArgument("Could not create gvar in this context.")
+            str_value = str(value)
+            if len(str_value) > _GVAR_SIZE_LIMIT:
+                raise avrae_argparser.InvalidArgument(f"Gvars must be shorter than {_GVAR_SIZE_LIMIT:,} characters.")
+            key = str(uuid.uuid4())
+            _charge_gvar_write(key)
+            resolver.set_value(key, str_value, script_writable=bool(script_writable))
+            return key
 
         def _get_svar(name: str, default=None):
             return var_store.svars.get(str(name), default)
@@ -545,7 +593,7 @@ class MockExecutor:
                 if mod_contents is None:
                     raise ModuleNotFoundError(f"No gvar named {addr!r}")
 
-                module_sources[addr] = str(mod_contents)
+                module_sources[addr] = str(gvar_value(mod_contents))
                 old_names = getattr(interp, "_names", {})
                 depth_increased = False
                 try:
@@ -555,7 +603,7 @@ class MockExecutor:
                     if interp._depth > interp._config.max_recursion_depth:
                         raise RecursionError("Maximum recursion depth exceeded")
                     try:
-                        interp.execute_module(str(mod_contents), module_name=addr)
+                        interp.execute_module(str(gvar_value(mod_contents)), module_name=addr)
                     except Exception as exc:
                         raise ModuleExecutionError(addr, exc) from exc
                     mod_ns = SimpleNamespace(**getattr(interp, "_names", {}))
@@ -680,6 +728,8 @@ class MockExecutor:
             combat=lambda: ns_combat,
             character=lambda: character_fn(),
             get_gvar=_get_gvar,
+            set_gvar=_set_gvar,
+            create_gvar=_create_gvar,
             get_svar=_get_svar,
             get_uvar=_get_uvar,
             get_uvars=_get_uvars,
@@ -757,7 +807,7 @@ async def _ensure_nested_gvars(resolver: GVarResolver) -> None:
     """Recursively prefetch gvars referenced by already-fetched gvar modules."""
     visited: set[str] = set()
     while True:
-        snapshot = resolver.snapshot()
+        snapshot = resolver.value_snapshot()
         newly_fetched: set[str] = set()
         for key, value in snapshot.items():
             if key in visited:

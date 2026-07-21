@@ -49,6 +49,14 @@ def _runtime_helper_sigs() -> Dict[str, FunctionSig]:
             ["address"],
             "Retrieves and returns the value of a global variable (gvar) by address.",
         ),
+        "set_gvar": (
+            ["address", "value"],
+            "Sets an existing script-writable gvar's value for the current mock execution.",
+        ),
+        "create_gvar": (
+            ["value", "script_writable=False"],
+            "Creates a new mock gvar for the current execution and returns its UUID.",
+        ),
         "get_svar": (
             ["name", "default=None"],
             "Gets a server variable by name, returning default if it is not present.",

@@ -16,6 +16,80 @@ from avrae_ls.runtime.cvars import derive_character_cvars
 
 log = logging.getLogger(__name__)
 _SKIP_GVAR = object()
+GVAR_VALUE_KEY = "value"
+GVAR_SCRIPT_WRITABLE_KEY = "scriptWritable"
+
+
+def make_gvar_record(value: Any, *, script_writable: bool = False) -> Dict[str, Any]:
+    return {
+        GVAR_VALUE_KEY: value,
+        GVAR_SCRIPT_WRITABLE_KEY: bool(script_writable),
+    }
+
+
+def gvar_value(entry: Any) -> Any:
+    if isinstance(entry, dict) and GVAR_VALUE_KEY in entry:
+        return entry.get(GVAR_VALUE_KEY)
+    return entry
+
+
+def gvar_script_writable(entry: Any) -> bool:
+    if isinstance(entry, dict) and GVAR_VALUE_KEY in entry:
+        return bool(entry.get(GVAR_SCRIPT_WRITABLE_KEY, False))
+    return False
+
+
+def normalize_gvar_entry(
+    key: Any,
+    value: Any,
+    *,
+    relative_to: Path | None = None,
+    source_label: Path | None = None,
+) -> Dict[str, Any] | object:
+    if isinstance(value, dict):
+        script_writable = bool(value.get(GVAR_SCRIPT_WRITABLE_KEY, False))
+        file_path = value.get("filePath")
+        if file_path is None:
+            file_path = value.get("path")
+        if file_path is not None:
+            if not isinstance(file_path, str) or not file_path.strip():
+                log.warning("Invalid gvar file path for '%s' in %s; expected a non-empty string.", key, source_label)
+                return _SKIP_GVAR
+            gvar_path = Path(file_path)
+            if not gvar_path.is_absolute() and relative_to is not None:
+                gvar_path = relative_to / gvar_path
+            try:
+                return make_gvar_record(gvar_path.read_text(), script_writable=script_writable)
+            except FileNotFoundError:
+                log.warning("Gvar content file not found for '%s': %s", key, gvar_path)
+                return _SKIP_GVAR
+            except OSError as exc:
+                log.warning("Failed to read gvar content file for '%s' (%s): %s", key, gvar_path, exc)
+                return _SKIP_GVAR
+        if GVAR_VALUE_KEY in value or GVAR_SCRIPT_WRITABLE_KEY in value:
+            return make_gvar_record(value.get(GVAR_VALUE_KEY), script_writable=script_writable)
+    if isinstance(value, dict) and GVAR_VALUE_KEY in value:
+        return make_gvar_record(value.get(GVAR_VALUE_KEY), script_writable=gvar_script_writable(value))
+    return make_gvar_record(value, script_writable=False)
+
+
+def normalize_gvars(
+    gvars: Dict[str, Any] | None,
+    *,
+    relative_to: Path | None = None,
+    source_label: Path | None = None,
+) -> Dict[str, Dict[str, Any]]:
+    normalized: dict[str, Dict[str, Any]] = {}
+    for key, value in (gvars or {}).items():
+        parsed = normalize_gvar_entry(key, value, relative_to=relative_to, source_label=source_label)
+        if parsed is _SKIP_GVAR:
+            continue
+        normalized[str(key)] = parsed
+    return normalized
+
+
+def gvar_values_snapshot(gvars: Dict[str, Any] | None) -> Dict[str, Any]:
+    return {str(key): gvar_value(value) for key, value in (gvars or {}).items()}
 
 
 @dataclass
@@ -135,6 +209,9 @@ class ContextBuilder:
         builtin_cvars = derive_character_cvars(character)
         if builtin_cvars:
             merged = merged.merge(VarSources(cvars=builtin_cvars))
+        merged.gvars = normalize_gvars(
+            merged.gvars, relative_to=self._config.workspace_root, source_label=self._config.workspace_root
+        )
         return merged
 
     def _ensure_me_combatant(
@@ -222,7 +299,7 @@ class GVarResolver:
     def _silent_failure(self, key: str) -> bool:
         if not self._config.silent_gvar_fetch:
             return False
-        self._cache[str(key)] = None
+        self._cache[str(key)] = make_gvar_record(None, script_writable=False)
         return True
 
     def _silent_failure_many(self, keys: Iterable[str]) -> bool:
@@ -252,6 +329,7 @@ class GVarResolver:
             return self._silent_failure(key)
 
         value: Any = None
+        script_writable = False
         try:
             payload = resp.json()
         except Exception:
@@ -259,6 +337,7 @@ class GVarResolver:
 
         if isinstance(payload, dict) and "value" in payload:
             value = payload["value"]
+            script_writable = bool(payload.get("script_writable", False))
 
         if not blocking:
             log.debug("GVAR fetch parsed value for %s (type=%s)", key, type(value).__name__)
@@ -267,7 +346,7 @@ class GVarResolver:
             if not self._config.silent_gvar_fetch:
                 log.error("GVAR %s payload missing value", key)
             return self._silent_failure(key)
-        self._cache[key] = value
+        self._cache[key] = make_gvar_record(value, script_writable=script_writable)
         return True
 
     def reset(self, gvars: Dict[str, Any] | None = None) -> None:
@@ -278,10 +357,40 @@ class GVarResolver:
         if not gvars:
             return
         for k, v in gvars.items():
-            self._cache[str(k)] = v
+            normalized = normalize_gvar_entry(
+                k, v, relative_to=self._config.workspace_root, source_label=self._config.workspace_root
+            )
+            if normalized is _SKIP_GVAR:
+                continue
+            self._cache[str(k)] = normalized
 
     def get_local(self, key: str) -> Any:
-        return self._cache.get(str(key))
+        return gvar_value(self._cache.get(str(key)))
+
+    def get_record(self, key: str) -> Dict[str, Any] | None:
+        entry = self._cache.get(str(key))
+        if entry is None:
+            return None
+        normalized = normalize_gvar_entry(
+            key,
+            entry,
+            relative_to=self._config.workspace_root,
+            source_label=self._config.workspace_root,
+        )
+        if normalized is _SKIP_GVAR:
+            return None
+        return normalized
+
+    def is_script_writable(self, key: str) -> bool:
+        return gvar_script_writable(self._cache.get(str(key)))
+
+    def set_value(self, key: str, value: Any, *, script_writable: bool | None = None) -> Dict[str, Any]:
+        record = self.get_record(key) or make_gvar_record(None, script_writable=False)
+        record[GVAR_VALUE_KEY] = value
+        if script_writable is not None:
+            record[GVAR_SCRIPT_WRITABLE_KEY] = bool(script_writable)
+        self._cache[str(key)] = record
+        return record
 
     async def ensure(self, key: str) -> bool:
         key = str(key)
@@ -357,12 +466,18 @@ class GVarResolver:
         return self._handle_gvar_response(key, resp, blocking=True)
 
     def snapshot(self) -> Dict[str, Any]:
-        return dict(self._cache)
+        return {
+            str(key): dict(value) if isinstance(value, dict) else make_gvar_record(value, script_writable=False)
+            for key, value in self._cache.items()
+        }
+
+    def value_snapshot(self) -> Dict[str, Any]:
+        return gvar_values_snapshot(self._cache)
 
     def load_snapshot(self, gvars: Dict[str, Any] | None = None) -> None:
         self._cache = {}
         if gvars:
-            self._cache.update({str(k): v for k, v in gvars.items()})
+            self.seed(gvars)
 
     async def refresh(self, seed: Dict[str, Any] | None = None, keys: Iterable[str] | None = None) -> Dict[str, Any]:
         self.reset(seed)
@@ -437,39 +552,11 @@ def _var_sources_from_file(path: Path, data: Dict[str, Any]) -> VarSources:
 
 
 def _resolve_gvar_file_refs(var_file: Path, gvars: Dict[str, Any]) -> Dict[str, Any]:
-    resolved: dict[str, Any] = {}
-    for key, value in gvars.items():
-        parsed = _parse_gvar_value(var_file, key, value)
-        if parsed is _SKIP_GVAR:
-            continue
-        resolved[str(key)] = parsed
-    return resolved
+    return normalize_gvars(gvars, relative_to=var_file.parent, source_label=var_file)
 
 
 def _parse_gvar_value(var_file: Path, key: Any, value: Any) -> Any:
-    if not isinstance(value, dict):
-        return value
-
-    file_path = value.get("filePath")
-    if file_path is None:
-        file_path = value.get("path")
-    if file_path is None:
-        return value
-    if not isinstance(file_path, str) or not file_path.strip():
-        log.warning("Invalid gvar file path for '%s' in %s; expected a non-empty string.", key, var_file)
-        return _SKIP_GVAR
-
-    gvar_path = Path(file_path)
-    if not gvar_path.is_absolute():
-        gvar_path = var_file.parent / gvar_path
-    try:
-        return gvar_path.read_text()
-    except FileNotFoundError:
-        log.warning("Gvar content file not found for '%s': %s", key, gvar_path)
-        return _SKIP_GVAR
-    except OSError as exc:
-        log.warning("Failed to read gvar content file for '%s' (%s): %s", key, gvar_path, exc)
-        return _SKIP_GVAR
+    return normalize_gvar_entry(key, value, relative_to=var_file.parent, source_label=var_file)
 
 
 def _fast_clone(value: Any) -> Any:

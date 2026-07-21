@@ -97,6 +97,15 @@ async def test_fetches_gvar_when_enabled(tmp_path):
             "def inner():\n    y = 1\ninner()\ny", None, ["undefined"], None, None, id="function_scope_not_global"
         ),
         pytest.param("get_gvar('abc')", None, ["gvar"], None, None, id="unknown_gvar"),
+        pytest.param("set_gvar('abc', 'x')", None, ["gvar"], None, None, id="unknown_gvar_set"),
+        pytest.param(
+            "set_gvar('mod', 'x')",
+            None,
+            [],
+            {"mod": {"value": "answer = 1", "scriptWritable": True}},
+            None,
+            id="known_gvar_set",
+        ),
         pytest.param(
             "class X:\n    def _hidden(self):\n        return 1\n\nX()._hidden()",
             None,

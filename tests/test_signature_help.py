@@ -5,6 +5,7 @@ from pathlib import Path
 from pygls.workspace import Workspace
 
 from avrae_ls.lsp.signature_help import FunctionSig, signature_help_for_code
+from avrae_ls.lsp.signature_help import load_signatures
 from avrae_ls.lsp.server import AvraeLanguageServer, on_signature_help
 
 
@@ -133,3 +134,10 @@ def test_signature_help_multiline_args_tracks_line_breaks():
     assert help_ is not None
     assert help_.signatures[0].label.startswith("outer(")
     assert help_.active_parameter == 1
+
+
+def test_runtime_signature_table_includes_gvar_write_helpers():
+    sigs = load_signatures()
+
+    assert sigs["set_gvar"].label == "set_gvar(address, value)"
+    assert sigs["create_gvar"].label == "create_gvar(value, script_writable=False)"

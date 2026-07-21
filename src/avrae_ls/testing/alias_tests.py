@@ -8,7 +8,7 @@ from typing import Any, Iterable, Sequence
 
 from avrae_ls.runtime import argparser as avrae_argparser
 from avrae_ls.runtime.alias_preview import render_alias_command, simulate_command
-from avrae_ls.runtime.context import ContextBuilder, ContextData
+from avrae_ls.runtime.context import ContextBuilder, ContextData, normalize_gvars
 from avrae_ls.runtime.errors import format_runtime_error
 from avrae_ls.runtime.runtime import MockExecutor
 from avrae_ls.config import VarSources
@@ -226,6 +226,11 @@ async def run_alias_test(
     ctx_data = builder.build_from_baseline(base_context)
     if case.var_overrides:
         ctx_data.vars = ctx_data.vars.merge(VarSources.from_data(case.var_overrides))
+        ctx_data.vars.gvars = normalize_gvars(
+            ctx_data.vars.gvars,
+            relative_to=builder._config.workspace_root,
+            source_label=builder._config.workspace_root,
+        )
     if case.character_overrides:
         ctx_data.character = deep_merge_dicts(ctx_data.character, case.character_overrides)
     shared_gvar_cache = suite_gvar_cache if suite_gvar_cache is not None else dict(ctx_data.vars.gvars)

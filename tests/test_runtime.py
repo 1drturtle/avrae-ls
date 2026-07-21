@@ -83,6 +83,137 @@ async def test_mock_executor_resolves_gvars(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_create_gvar_returns_uuid_and_is_readable_same_run(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run("gid = create_gvar('hello')\nreturn [gid, get_gvar(gid)]", ctx, resolver)
+
+    assert result.error is None
+    gid, value = result.value
+    assert isinstance(gid, str)
+    assert len(gid) == 36
+    assert value == "hello"
+    assert resolver.is_script_writable(gid) is False
+
+
+@pytest.mark.asyncio
+async def test_create_gvar_writable_can_be_set_in_same_run(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run(
+        "gid = create_gvar('initial', True)\nset_gvar(gid, 'updated')\nreturn get_gvar(gid)", ctx, resolver
+    )
+
+    assert result.error is None
+    assert result.value == "updated"
+
+
+@pytest.mark.asyncio
+async def test_set_gvar_missing_errors(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run("set_gvar('missing', 'value')", ctx, resolver)
+
+    assert result.error is not None
+    assert "Global variable not found" in str(result.error)
+
+
+@pytest.mark.asyncio
+async def test_set_gvar_requires_script_writable(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+    resolver.seed({"locked": "initial"})
+
+    result = await executor.run("set_gvar('locked', 'value')", ctx, resolver)
+
+    assert result.error is not None
+    assert "not writable by scripting" in str(result.error)
+
+
+@pytest.mark.asyncio
+async def test_set_gvar_updates_existing_writable_gvar(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+    resolver.seed({"mod": {"value": "initial", "scriptWritable": True}})
+
+    result = await executor.run("set_gvar('mod', 'updated')\nget_gvar('mod')", ctx, resolver)
+
+    assert result.error is None
+    assert result.value == "updated"
+
+
+@pytest.mark.asyncio
+async def test_gvar_write_limit_counts_distinct_addresses(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run("for i in range(51):\n    create_gvar(i)", ctx, resolver)
+
+    assert result.error is not None
+    assert "Too many gvar writes" in str(result.error)
+
+
+@pytest.mark.asyncio
+async def test_gvar_write_limit_allows_repeated_writes_to_same_address(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run(
+        "gid = create_gvar('0', True)\nfor i in range(100):\n    set_gvar(gid, i)\nreturn get_gvar(gid)", ctx, resolver
+    )
+
+    assert result.error is None
+    assert result.value == "99"
+
+
+@pytest.mark.asyncio
+async def test_gvar_write_size_limits(tmp_path):
+    executor = MockExecutor()
+    ctx = _ctx()
+    resolver = _resolver(tmp_path)
+
+    result = await executor.run("create_gvar('x' * 100001)", ctx, resolver)
+    assert result.error is not None
+    assert "100,000" in str(result.error)
+
+    resolver.seed({"mod": {"value": "ok", "scriptWritable": True}})
+    result = await executor.run("set_gvar('mod', 'y' * 100001)", ctx, resolver)
+    assert result.error is not None
+    assert "100,000" in str(result.error)
+
+
+@pytest.mark.asyncio
+async def test_gvar_writes_do_not_persist_across_fresh_execution(tmp_path):
+    executor = MockExecutor()
+    cfg = AvraeLSConfig.default(tmp_path)
+    builder = ContextBuilder(cfg)
+    baseline = builder.build_baseline()
+
+    ctx = builder.build_from_baseline(baseline)
+    builder.gvar_resolver.reset(ctx.vars.gvars)
+    result = await executor.run(
+        "gid = create_gvar('hello', True)\nset_gvar(gid, 'updated')\nreturn gid", ctx, builder.gvar_resolver
+    )
+    assert result.error is None
+    gid = result.value
+    assert builder.gvar_resolver.get_local(gid) == "updated"
+
+    fresh = builder.build_from_baseline(baseline)
+    builder.gvar_resolver.reset(fresh.vars.gvars)
+    assert builder.gvar_resolver.get_local(gid) is None
+
+
+@pytest.mark.asyncio
 async def test_silent_gvar_fetch_raises_when_none_used(tmp_path):
     cfg = AvraeLSConfig.default(tmp_path)
     cfg.silent_gvar_fetch = True

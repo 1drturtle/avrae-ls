@@ -326,7 +326,7 @@ async def _check_gvars(
                     )
                 )
 
-        if node.func.id == "get_gvar":
+        if node.func.id in {"get_gvar", "set_gvar"}:
             if node.args:
                 await _validate_gvar(node.args[0])
         elif node.func.id == "using":
@@ -644,6 +644,8 @@ def _build_builtin_signatures() -> dict[str, inspect.Signature]:
 
     # runtime helpers we expose
     def get_gvar(key): ...
+    def set_gvar(address, value): ...
+    def create_gvar(value, script_writable=False): ...
     def get_svar(name, default=None): ...
     def get_uvar(name, default=None): ...
     def get_uvars(): ...
@@ -660,6 +662,8 @@ def _build_builtin_signatures() -> dict[str, inspect.Signature]:
 
     helpers = {
         "get_gvar": get_gvar,
+        "set_gvar": set_gvar,
+        "create_gvar": create_gvar,
         "get_svar": get_svar,
         "get_uvar": get_uvar,
         "get_uvars": get_uvars,

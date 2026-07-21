@@ -90,7 +90,7 @@ The language server reads a workspace-level `.avraels.json` file to shape diagno
 - `enableGvarFetch`: Opt-in to fetch gvars from Avrae using `avraeService.token` when diagnostics/commands encounter `get_gvar`. When disabled, only locally provided gvars are used.
 - `avraeService.baseUrl` / `token`: Host and bearer token for gvar fetches.
 - `diagnostics.semanticLevel` / `runtimeLevel`: How LSP diagnostics are reported (`error`, `warning`, `information`, `hint`).
-- `varFiles`: Additional JSON files merged into `vars` for the active profile; workspace-relative unless absolute. Each file uses the same shape as `vars` below. For `gvars`, values can be inline or `{ "filePath": "..." }` (or `"path"`) to load content from another file (relative to the var file).
+- `varFiles`: Additional JSON files merged into `vars` for the active profile; workspace-relative unless absolute. Each file uses the same shape as `vars` below. For `gvars`, values can be inline strings, `{ "value": "..." }`, or `{ "filePath": "..." }` / `{ "path": "..." }` to load content from another file (relative to the var file). Add `"scriptWritable": true` to either object form to allow `set_gvar(...)` in the mock runtime.
 - `profiles`: Named context profiles. Each profile can override `ctx`, `combat`, `character`, `vars`, and optionally `description`.
 - `defaultProfile`: Which profile is selected when the server starts.
 
@@ -104,7 +104,8 @@ Place additional vars in any file referenced by `varFiles`. Local gvars here ove
   "svars": {},
   "gvars": {
     "xyz789": "answer = 12",
-    "abc123": { "filePath": "gvars/abc123.drac2" }
+    "abc123": { "filePath": "gvars/abc123.drac2", "scriptWritable": true },
+    "inlineWritable": { "value": "answer = 99", "scriptWritable": true }
   }
 }
 ```
