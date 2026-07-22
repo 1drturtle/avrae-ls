@@ -288,7 +288,7 @@ class MockExecutor:
         self._ast_cache: OrderedDict[str, tuple[str, list[Any]]] = OrderedDict()
 
     def available_names(self, ctx_data: ContextData) -> Set[str]:
-        builtin_names = set(self._base_builtins.keys())
+        builtin_names = set(draconic.DraconicConfig().default_names) | set(self._base_builtins)
         runtime_names = {
             "ctx",
             "combat",

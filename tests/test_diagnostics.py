@@ -139,6 +139,22 @@ async def test_fetches_gvar_when_enabled(tmp_path):
         ),
         pytest.param("!alias roll echo rolled {1}", "echo rolled 1", [], None, None, id="inline_roll_replaced"),
         pytest.param("[x for x in range(3)]", None, [], None, None, id="list_comprehension_scopes_target"),
+        pytest.param(
+            "bool()\ntuple()\ndict()\nlist()\nset()",
+            None,
+            [],
+            None,
+            None,
+            id="draconic_default_type_builders_available",
+        ),
+        pytest.param(
+            "(lambda x, y=1, *args, flag=True, **kwargs: x + y + len(args) + int(flag) + len(kwargs))(2)",
+            None,
+            [],
+            None,
+            None,
+            id="lambda_parameters_are_scoped",
+        ),
         pytest.param("get_cvar", None, ["undefined"], None, None, id="bare_get_cvar_not_allowed"),
     ],
 )
@@ -163,6 +179,19 @@ async def test_diagnostic_matrix(
     if expected_command is not None:
         rendered = await render_alias_command(alias_text, provider._executor, ctx_data, resolver)
         assert rendered.command == expected_command
+
+
+@pytest.mark.asyncio
+async def test_lambda_defaults_use_outer_scope_and_parameters_do_not_leak(tmp_path):
+    provider = _provider()
+    resolver = _resolver(tmp_path)
+    ctx_data = ContextData(vars=VarSources())
+
+    diags = await provider.analyze("lambda value=missing: value", ctx_data, resolver)
+    assert [diag.message for diag in diags] == ["'missing' may be undefined in this scope"]
+
+    diags = await provider.analyze("callback = lambda local: local\nlocal", ctx_data, resolver)
+    assert [diag.message for diag in diags] == ["'local' may be undefined in this scope"]
 
 
 @pytest.mark.asyncio

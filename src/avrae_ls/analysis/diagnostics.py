@@ -141,6 +141,14 @@ class DiagnosticProvider:
                 self._define([node.name])
                 self._with_new_scope(self._bind_args, node.args, node.body)
 
+            def visit_Lambda(self, node: ast.Lambda):
+                # Defaults are evaluated when the lambda is created, before its
+                # parameters are bound in the lambda's own scope.
+                for default in (*node.args.defaults, *node.args.kw_defaults):
+                    if default is not None:
+                        self.visit(default)
+                self._with_new_scope(self._bind_args, node.args, [node.body])
+
             def visit_ClassDef(self, node: ast.ClassDef):
                 self._define([node.name])
                 self._with_new_scope(lambda _: None, None, node.body)
@@ -224,7 +232,7 @@ class DiagnosticProvider:
                 self.visit(node.value)
                 self._define([node.target.id] if isinstance(node.target, ast.Name) else _names_in_target(node.target))
 
-            def _with_new_scope(self, binder, args, body: list[ast.stmt]):
+            def _with_new_scope(self, binder, args, body: Sequence[ast.AST]):
                 self._scopes.append(set())
                 try:
                     if binder and args is not None:
