@@ -97,3 +97,13 @@ def test_load_config_profiles_overlay_builtin_defaults(tmp_path: Path):
     gm_profile = cfg.profiles["gm"]
     assert gm_profile.ctx["prefix"] == ";"
     assert gm_profile.ctx["author"]["display_name"] == "Aelar Wyn"
+
+
+def test_load_config_testing_instruction_logging(tmp_path: Path):
+    _write_config(tmp_path, {"testing": {"logInstructionCounts": True, "logLoopCounts": True}})
+
+    cfg, warnings = load_config(tmp_path)
+
+    assert warnings == []
+    assert cfg.testing.log_instruction_counts is True
+    assert cfg.testing.log_loop_counts is True

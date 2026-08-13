@@ -11,6 +11,42 @@ import yaml
 MISSING_VALUE = "<missing>"
 
 
+def instruction_limit_message(
+    instruction_count: int,
+    compatibility_limit: int,
+    *,
+    hard_limit_reached: bool = False,
+) -> str | None:
+    if hard_limit_reached:
+        return (
+            "Test stopped at safety limit: at least "
+            f"{instruction_count:,} / {compatibility_limit:,} instructions "
+            f"({instruction_count / compatibility_limit:.1%})."
+        )
+    if instruction_count > compatibility_limit:
+        return (
+            f"Instruction limit exceeded: {instruction_count:,} / {compatibility_limit:,} instructions "
+            f"({instruction_count / compatibility_limit:.1%})."
+        )
+    return None
+
+
+def loop_limit_message(
+    loop_count: int,
+    compatibility_limit: int,
+    *,
+    hard_limit_reached: bool = False,
+) -> str | None:
+    if hard_limit_reached:
+        return (
+            "Test stopped at loop safety limit: at least "
+            f"{loop_count:,} / {compatibility_limit:,} loops ({loop_count / compatibility_limit:.1%})."
+        )
+    if loop_count > compatibility_limit:
+        return f"Loop limit exceeded: {loop_count:,} / {compatibility_limit:,} loops ({loop_count / compatibility_limit:.1%})."
+    return None
+
+
 @dataclass(frozen=True)
 class TestMetadata:
     name: str | None = None

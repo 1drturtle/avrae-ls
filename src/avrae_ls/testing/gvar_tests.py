@@ -10,9 +10,11 @@ from avrae_ls.config import VarSources
 from avrae_ls.gvar_utils import sanitize_gvar_binding
 from avrae_ls.runtime.context import ContextBuilder, ContextData, normalize_gvars
 from avrae_ls.runtime.errors import format_runtime_error, runtime_error_details
-from avrae_ls.runtime.runtime import MockExecutor, ModuleExecutionError
+from avrae_ls.runtime.runtime import InstructionBudget, MockExecutor, ModuleExecutionError
 from avrae_ls.testing._common import (
     deep_merge_dicts,
+    instruction_limit_message,
+    loop_limit_message,
     merge_new_gvars_into_suite_cache,
     parse_expected_value,
     parse_test_metadata,
@@ -59,6 +61,8 @@ class GVarTestResult:
     details: str | None = None
     error_line: int | None = None
     error_col: int | None = None
+    instruction_count: int = 0
+    loop_count: int = 0
 
 
 def parse_gvar_tests(path: Path) -> list[GVarTestCase]:
@@ -158,22 +162,22 @@ async def run_gvar_tests(
     for case in case_list:
         error = gvar_errors.get(case.gvar_path)
         if error is not None:
-            results.append(GVarTestResult(case=case, passed=False, actual=None, stdout="", error=error))
+            result = GVarTestResult(case=case, passed=False, actual=None, stdout="", error=error)
+            results.append(result)
             continue
         baseline = baselines.get(case.profile)
         if baseline is None:
             baseline = builder.build_baseline(case.profile)
             baselines[case.profile] = baseline
-        results.append(
-            await run_gvar_test(
-                case,
-                builder,
-                executor,
-                gvar_source=gvar_sources.get(case.gvar_path),
-                base_context=baseline,
-                suite_gvar_cache=shared_gvar_cache,
-            )
+        result = await run_gvar_test(
+            case,
+            builder,
+            executor,
+            gvar_source=gvar_sources.get(case.gvar_path),
+            base_context=baseline,
+            suite_gvar_cache=shared_gvar_cache,
         )
+        results.append(result)
     return results
 
 
@@ -224,7 +228,8 @@ async def run_gvar_test(
     builder.gvar_resolver.seed({case.gvar_name: gvar_source})
     local_only_gvars.add(case.gvar_name)
     wrapped_code = _wrap_test_body(case.binding_name, case.gvar_name, case.body)
-    result = await executor.run(wrapped_code, ctx_data, builder.gvar_resolver)
+    instruction_budget = InstructionBudget()
+    result = await executor.run(wrapped_code, ctx_data, builder.gvar_resolver, instruction_budget)
     merge_new_gvars_into_suite_cache(
         shared_gvar_cache,
         builder.gvar_resolver.snapshot(),
@@ -236,14 +241,32 @@ async def run_gvar_test(
         if details.module_line is not None:
             error_line = details.module_line
             error_col = details.module_col
+        error = format_runtime_error(result.error)
+        limit_messages = _limit_messages(instruction_budget)
+        if limit_messages:
+            error = f"{error}\n{limit_messages}"
         return GVarTestResult(
             case=case,
             passed=False,
             actual=result.value,
             stdout=result.stdout,
-            error=format_runtime_error(result.error),
+            error=error,
             error_line=error_line,
             error_col=error_col,
+            instruction_count=instruction_budget.instruction_count,
+            loop_count=instruction_budget.loop_count,
+        )
+
+    limit_messages = _limit_messages(instruction_budget)
+    if limit_messages:
+        return GVarTestResult(
+            case=case,
+            passed=False,
+            actual=result.value,
+            stdout=result.stdout,
+            error=limit_messages,
+            instruction_count=instruction_budget.instruction_count,
+            loop_count=instruction_budget.loop_count,
         )
 
     passed = value_matches(case.expected, result.value)
@@ -254,7 +277,25 @@ async def run_gvar_test(
         actual=result.value,
         stdout=result.stdout,
         details=details,
+        instruction_count=instruction_budget.instruction_count,
+        loop_count=instruction_budget.loop_count,
     )
+
+
+def _limit_messages(instruction_budget: InstructionBudget) -> str | None:
+    messages = [
+        instruction_limit_message(
+            instruction_budget.instruction_count,
+            instruction_budget.compatibility_limit,
+            hard_limit_reached=instruction_budget.hard_limit_reached,
+        ),
+        loop_limit_message(
+            instruction_budget.loop_count,
+            instruction_budget.loop_compatibility_limit,
+            hard_limit_reached=instruction_budget.loop_hard_limit_reached,
+        ),
+    ]
+    return "\n".join(message for message in messages if message) or None
 
 
 def _resolve_gvar_path(path: Path) -> Path:

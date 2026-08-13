@@ -33,6 +33,10 @@ _EXECUTOR_ENABLE_AST_CACHE = True
 _EXECUTOR_AST_CACHE_SIZE = 256
 _GVAR_SIZE_LIMIT = 100_000
 _GVAR_WRITES_PER_EXECUTION = 50
+AVRAE_INSTRUCTION_LIMIT = 100_000
+TEST_HARD_INSTRUCTION_LIMIT = 200_000
+AVRAE_LOOP_LIMIT = 10_000
+TEST_HARD_LOOP_LIMIT = 20_000
 
 
 # Minimal stand-in for Avrae's AliasException
@@ -85,6 +89,46 @@ class ExecutionResult:
     stdout: str
     value: Any = None
     error: BaseException | None = None
+    instruction_count: int = 0
+    loop_count: int = 0
+
+
+@dataclass
+class InstructionBudget:
+    """Cumulative instruction limits for one alias or gvar test case."""
+
+    compatibility_limit: int = AVRAE_INSTRUCTION_LIMIT
+    hard_limit: int = TEST_HARD_INSTRUCTION_LIMIT
+    instruction_count: int = 0
+    hard_limit_reached: bool = False
+    loop_compatibility_limit: int = AVRAE_LOOP_LIMIT
+    loop_hard_limit: int = TEST_HARD_LOOP_LIMIT
+    loop_count: int = 0
+    loop_hard_limit_reached: bool = False
+
+    @property
+    def remaining_hard_limit(self) -> int:
+        return max(self.hard_limit - self.instruction_count, 0)
+
+    @property
+    def compatibility_limit_exceeded(self) -> bool:
+        return self.instruction_count > self.compatibility_limit
+
+    @property
+    def remaining_loop_hard_limit(self) -> int:
+        return max(self.loop_hard_limit - self.loop_count, 0)
+
+    @property
+    def loop_compatibility_limit_exceeded(self) -> bool:
+        return self.loop_count > self.loop_compatibility_limit
+
+    def record(self, instruction_count: int, loop_count: int) -> None:
+        self.instruction_count += instruction_count
+        if self.instruction_count > self.hard_limit:
+            self.hard_limit_reached = True
+        self.loop_count += loop_count
+        if self.loop_count > self.loop_hard_limit:
+            self.loop_hard_limit_reached = True
 
 
 def _roll_dice(dice: str) -> int:
@@ -332,6 +376,7 @@ class MockExecutor:
         code: str,
         ctx_data: ContextData,
         gvar_resolver: GVarResolver | None = None,
+        instruction_budget: InstructionBudget | None = None,
     ) -> ExecutionResult:
         run_started = time.perf_counter()
         buffer = io.StringIO()
@@ -365,9 +410,12 @@ class MockExecutor:
             module_sources=module_sources,
             touched_gvars=touched_gvars,
         )
+        max_statements = instruction_budget.remaining_hard_limit if instruction_budget else AVRAE_INSTRUCTION_LIMIT
+        max_loops = instruction_budget.remaining_loop_hard_limit if instruction_budget else AVRAE_LOOP_LIMIT
         interpreter = draconic.DraconicInterpreter(
             builtins=builtins,
             initial_names=ctx_data.vars.to_initial_names(),
+            config=draconic.DraconicConfig(max_statements=max_statements, max_loops=max_loops),
         )
         interpreter_ref["interpreter"] = interpreter
 
@@ -393,6 +441,10 @@ class MockExecutor:
             attach_runtime_error_context(error, module_sources=module_sources)
             log.debug("Mock execution error: %s", exc, exc_info=exc)
         exec_elapsed_ms = (time.perf_counter() - exec_started) * 1000
+        instruction_count = interpreter._num_stmts
+        loop_count = interpreter._loops
+        if instruction_budget is not None:
+            instruction_budget.record(instruction_count, loop_count)
         log.debug(
             "MockExecutor.run parse=%.2fms execute=%.2fms total=%.2fms cache_hit=%s",
             parse_elapsed_ms,
@@ -400,7 +452,13 @@ class MockExecutor:
             (time.perf_counter() - run_started) * 1000,
             cache_hit,
         )
-        return ExecutionResult(stdout=buffer.getvalue(), value=value, error=error)
+        return ExecutionResult(
+            stdout=buffer.getvalue(),
+            value=value,
+            error=error,
+            instruction_count=instruction_count,
+            loop_count=loop_count,
+        )
 
     def _parse_for_execution(
         self,

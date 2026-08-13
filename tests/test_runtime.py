@@ -4,7 +4,16 @@ import pytest
 from avrae_ls.runtime.argparser import InvalidArgument
 from avrae_ls.config import AvraeLSConfig, VarSources
 from avrae_ls.runtime.context import ContextBuilder, ContextData, GVarResolver
-from avrae_ls.runtime.runtime import FunctionRequiresCharacter, MockExecutor, _parse_coins
+from avrae_ls.runtime.runtime import (
+    AVRAE_INSTRUCTION_LIMIT,
+    AVRAE_LOOP_LIMIT,
+    TEST_HARD_INSTRUCTION_LIMIT,
+    TEST_HARD_LOOP_LIMIT,
+    FunctionRequiresCharacter,
+    InstructionBudget,
+    MockExecutor,
+    _parse_coins,
+)
 
 
 def _ctx():
@@ -894,3 +903,61 @@ def test_documented_builtins_present():
         "sqrt",
     }
     assert documented.issubset(names)
+
+
+@pytest.mark.asyncio
+async def test_instruction_budget_allows_execution_past_compatibility_limit(tmp_path):
+    executor = MockExecutor()
+    budget = InstructionBudget()
+
+    result = await executor.run("x = 1\n" * 50_001, _ctx(), instruction_budget=budget)
+
+    assert result.error is None
+    assert result.instruction_count == 100_002
+    assert budget.instruction_count == 100_002
+    assert budget.compatibility_limit == AVRAE_INSTRUCTION_LIMIT
+    assert budget.hard_limit == TEST_HARD_INSTRUCTION_LIMIT
+    assert budget.compatibility_limit_exceeded
+
+
+@pytest.mark.asyncio
+async def test_instruction_budget_stops_at_hard_limit(tmp_path):
+    executor = MockExecutor()
+    budget = InstructionBudget(compatibility_limit=1, hard_limit=3)
+
+    result = await executor.run("1 + 2", _ctx(), instruction_budget=budget)
+
+    assert result.error is not None
+    assert result.instruction_count == 4
+    assert budget.instruction_count == 4
+    assert budget.hard_limit_reached
+
+
+@pytest.mark.asyncio
+async def test_loop_budget_allows_execution_past_compatibility_limit(tmp_path):
+    executor = MockExecutor()
+    budget = InstructionBudget(loop_compatibility_limit=1, loop_hard_limit=3)
+
+    result = await executor.run("for i in range(2):\n    pass", _ctx(), instruction_budget=budget)
+
+    assert result.error is None
+    assert result.loop_count == 2
+    assert budget.loop_count == 2
+    assert budget.loop_compatibility_limit == 1
+    assert budget.loop_hard_limit == 3
+    assert budget.loop_compatibility_limit_exceeded
+
+
+@pytest.mark.asyncio
+async def test_loop_budget_stops_at_hard_limit(tmp_path):
+    executor = MockExecutor()
+    budget = InstructionBudget(loop_compatibility_limit=1, loop_hard_limit=3)
+
+    result = await executor.run("for i in range(4):\n    pass", _ctx(), instruction_budget=budget)
+
+    assert result.error is not None
+    assert result.loop_count == 4
+    assert budget.loop_count == 4
+    assert budget.loop_hard_limit_reached
+    assert AVRAE_LOOP_LIMIT == 10_000
+    assert TEST_HARD_LOOP_LIMIT == 20_000

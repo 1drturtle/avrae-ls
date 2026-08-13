@@ -12,6 +12,12 @@ Alias tests and gvar tests let you run mock Avrae code and compare the result to
 avrae-ls --run-tests
 ```
 
+### Instruction budgets
+
+Every test has a budget of 100,000 instructions and loop budget of 10,000 from Avrae. A test that completes above either count fails and reports its total usage. To make the report useful for substantially over-budget code, test execution has separate 200,000-instruction and 20,000-loop safety caps; a test that reaches either cap reports that it used *at least* that many instructions or loops.
+
+Set `"testing": { "logInstructionCounts": true, "logLoopCounts": true }` in `.avraels.json` (either key may be omitted) to print the corresponding count for every test, including passing tests.
+
 ## File layout and discovery
 
 Tests are discovered by filename. The runner scans for:

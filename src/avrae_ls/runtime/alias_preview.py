@@ -6,7 +6,7 @@ from typing import Any, Optional, Tuple
 
 from avrae_ls.analysis.parser import DRACONIC_RE, INLINE_DRACONIC_RE, INLINE_ROLL_RE
 from avrae_ls.runtime import argparser as avrae_argparser
-from avrae_ls.runtime.runtime import ExecutionResult, MockExecutor, _roll_dice
+from avrae_ls.runtime.runtime import ExecutionResult, InstructionBudget, MockExecutor, _roll_dice
 from avrae_ls.runtime.context import ContextData, GVarResolver
 from avrae_ls.runtime.argument_parsing import apply_argument_parsing
 
@@ -19,6 +19,8 @@ class RenderedAlias:
     last_value: Any | None = None
     error_line: int | None = None
     error_col: int | None = None
+    instruction_count: int = 0
+    loop_count: int = 0
 
 
 @dataclass
@@ -128,6 +130,7 @@ async def render_alias_command(
     resolver: GVarResolver,
     args: list[str] | None = None,
     raw_args: str | None = None,
+    instruction_budget: InstructionBudget | None = None,
 ) -> RenderedAlias:
     """Replace <drac2> blocks with their evaluated values and return final command."""
     body, line_offset = _strip_alias_header_with_offset(text)
@@ -157,7 +160,7 @@ async def render_alias_command(
 
         if kind in {"block", "inline"}:
             code = match.group(1)
-            result: ExecutionResult = await executor.run(code, ctx_data, resolver)
+            result: ExecutionResult = await executor.run(code, ctx_data, resolver, instruction_budget)
             if result.stdout:
                 stdout_parts.append(result.stdout)
             if result.error:
@@ -185,6 +188,8 @@ async def render_alias_command(
         last_value=last_value,
         error_line=error_line,
         error_col=error_col,
+        instruction_count=instruction_budget.instruction_count if instruction_budget else 0,
+        loop_count=instruction_budget.loop_count if instruction_budget else 0,
     )
 
 

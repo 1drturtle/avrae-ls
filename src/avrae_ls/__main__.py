@@ -194,17 +194,36 @@ def _run_alias_tests(
         return 1 if parse_errors else 0
 
     alias_results = (
-        asyncio.run(run_alias_tests(alias_cases, builder, executor, suite_gvar_cache=shared_gvar_cache))
+        asyncio.run(
+            run_alias_tests(
+                alias_cases,
+                builder,
+                executor,
+                suite_gvar_cache=shared_gvar_cache,
+            )
+        )
         if alias_cases
         else []
     )
     gvar_results = (
-        asyncio.run(run_gvar_tests(gvar_cases, builder, executor, suite_gvar_cache=shared_gvar_cache))
+        asyncio.run(
+            run_gvar_tests(
+                gvar_cases,
+                builder,
+                executor,
+                suite_gvar_cache=shared_gvar_cache,
+            )
+        )
         if gvar_cases
         else []
     )
     results = [*alias_results, *gvar_results]
-    _print_test_results(results, workspace_root)
+    _print_test_results(
+        results,
+        workspace_root,
+        show_instruction_counts=config.testing.log_instruction_counts,
+        show_loop_counts=config.testing.log_loop_counts,
+    )
 
     failures = [res for res in results if not res.passed]
     return 1 if failures or parse_errors else 0
@@ -230,7 +249,13 @@ def _load_runtime_config(
     return config
 
 
-def _print_test_results(results: Sequence[AliasTestResult | GVarTestResult], workspace_root: Path) -> None:
+def _print_test_results(
+    results: Sequence[AliasTestResult | GVarTestResult],
+    workspace_root: Path,
+    *,
+    show_instruction_counts: bool = False,
+    show_loop_counts: bool = False,
+) -> None:
     total = len(results)
     passed = 0
     for res in results:
@@ -238,6 +263,10 @@ def _print_test_results(results: Sequence[AliasTestResult | GVarTestResult], wor
         label = f"{rel} ({res.case.name})" if res.case.name else rel
         status = "PASS" if res.passed else "FAIL"
         print(f"[{status}] {label} ({res.case.target_kind}: {res.case.target_name})")
+        if show_instruction_counts:
+            print(f"  Instructions: {res.instruction_count:,} / 100,000 ({res.instruction_count / 100_000:.1%})")
+        if show_loop_counts:
+            print(f"  Loops: {res.loop_count:,} / 10,000 ({res.loop_count / 10_000:.1%})")
         if res.passed:
             if res.stdout:
                 print(f"  Stdout: {res.stdout.strip()}")

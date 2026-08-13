@@ -3,7 +3,7 @@ import pytest
 from avrae_ls.__main__ import _format_value, _run_alias_tests
 from avrae_ls.config import AvraeLSConfig, ContextProfile, VarSources
 from avrae_ls.runtime.context import ContextBuilder
-from avrae_ls.runtime.runtime import MockExecutor
+from avrae_ls.runtime.runtime import InstructionBudget, MockExecutor
 from avrae_ls.testing.gvar_tests import GVarTestError, parse_gvar_tests, run_gvar_tests
 
 
@@ -37,6 +37,44 @@ async def test_runs_simple_gvar_test(tmp_path):
 
     assert result.passed
     assert result.actual == "Constant Gvar value"
+
+
+@pytest.mark.asyncio
+async def test_gvar_test_counts_imported_module_in_instruction_budget(monkeypatch, tmp_path):
+    class TinyInstructionBudget(InstructionBudget):
+        def __init__(self):
+            super().__init__(compatibility_limit=2, hard_limit=30)
+
+    monkeypatch.setattr("avrae_ls.testing.gvar_tests.InstructionBudget", TinyInstructionBudget)
+    (tmp_path / "module.gvar").write_text("answer = 42\n")
+    test_path = tmp_path / "module.gvar-test"
+    test_path.write_text("return module.answer\n---\n42\n")
+    config = AvraeLSConfig.default(tmp_path)
+
+    result = (await run_gvar_tests(parse_gvar_tests(test_path), ContextBuilder(config), MockExecutor()))[0]
+
+    assert not result.passed
+    assert result.instruction_count > 2
+    assert "Instruction limit exceeded" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_gvar_test_counts_imported_module_loops(monkeypatch, tmp_path):
+    class TinyLoopBudget(InstructionBudget):
+        def __init__(self):
+            super().__init__(loop_compatibility_limit=1, loop_hard_limit=3)
+
+    monkeypatch.setattr("avrae_ls.testing.gvar_tests.InstructionBudget", TinyLoopBudget)
+    (tmp_path / "module.gvar").write_text("for i in range(2):\n    pass\nanswer = 42\n")
+    test_path = tmp_path / "module.gvar-test"
+    test_path.write_text("return module.answer\n---\n42\n")
+    config = AvraeLSConfig.default(tmp_path)
+
+    result = (await run_gvar_tests(parse_gvar_tests(test_path), ContextBuilder(config), MockExecutor()))[0]
+
+    assert not result.passed
+    assert result.loop_count == 2
+    assert "Loop limit exceeded: 2 / 1" in (result.error or "")
 
 
 def test_parses_multiple_gvar_tests_in_one_file(tmp_path):

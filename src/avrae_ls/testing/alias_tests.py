@@ -10,12 +10,14 @@ from avrae_ls.runtime import argparser as avrae_argparser
 from avrae_ls.runtime.alias_preview import render_alias_command, simulate_command
 from avrae_ls.runtime.context import ContextBuilder, ContextData, normalize_gvars
 from avrae_ls.runtime.errors import format_runtime_error
-from avrae_ls.runtime.runtime import MockExecutor
+from avrae_ls.runtime.runtime import InstructionBudget, MockExecutor
 from avrae_ls.config import VarSources
 from avrae_ls.testing._common import (
     deep_merge_dicts,
     dict_matches,
     merge_new_gvars_into_suite_cache,
+    instruction_limit_message,
+    loop_limit_message,
     parse_expected_value,
     parse_test_metadata,
     scalar_matches,
@@ -61,6 +63,8 @@ class AliasTestResult:
     details: str | None = None
     error_line: int | None = None
     error_col: int | None = None
+    instruction_count: int = 0
+    loop_count: int = 0
 
 
 def discover_test_files(
@@ -175,22 +179,22 @@ async def run_alias_tests(
     for case in case_list:
         error = alias_errors.get(case.alias_path)
         if error is not None:
-            results.append(AliasTestResult(case=case, passed=False, actual=None, stdout="", error=error))
+            result = AliasTestResult(case=case, passed=False, actual=None, stdout="", error=error)
+            results.append(result)
             continue
         baseline = baselines.get(case.profile)
         if baseline is None:
             baseline = builder.build_baseline(case.profile)
             baselines[case.profile] = baseline
-        results.append(
-            await run_alias_test(
-                case,
-                builder,
-                executor,
-                alias_source=alias_sources.get(case.alias_path),
-                base_context=baseline,
-                suite_gvar_cache=shared_gvar_cache,
-            )
+        result = await run_alias_test(
+            case,
+            builder,
+            executor,
+            alias_source=alias_sources.get(case.alias_path),
+            base_context=baseline,
+            suite_gvar_cache=shared_gvar_cache,
         )
+        results.append(result)
     return results
 
 
@@ -238,21 +242,47 @@ async def run_alias_test(
     builder.gvar_resolver.seed(ctx_data.vars.gvars)
     local_only_gvars = set(ctx_data.vars.gvars.keys())
 
-    rendered = await render_alias_command(alias_source, executor, ctx_data, builder.gvar_resolver, args=case.args)
+    instruction_budget = InstructionBudget()
+    rendered = await render_alias_command(
+        alias_source,
+        executor,
+        ctx_data,
+        builder.gvar_resolver,
+        args=case.args,
+        instruction_budget=instruction_budget,
+    )
     merge_new_gvars_into_suite_cache(
         shared_gvar_cache,
         builder.gvar_resolver.snapshot(),
         exclude_keys=local_only_gvars,
     )
     if rendered.error:
+        error = format_runtime_error(rendered.error)
+        limit_messages = _limit_messages(instruction_budget)
+        if limit_messages:
+            error = f"{error}\n{limit_messages}"
         return AliasTestResult(
             case=case,
             passed=False,
             actual=None,
             stdout=rendered.stdout,
-            error=format_runtime_error(rendered.error),
+            error=error,
             error_line=rendered.error_line,
             error_col=rendered.error_col,
+            instruction_count=instruction_budget.instruction_count,
+            loop_count=instruction_budget.loop_count,
+        )
+
+    limit_messages = _limit_messages(instruction_budget)
+    if limit_messages:
+        return AliasTestResult(
+            case=case,
+            passed=False,
+            actual=None,
+            stdout=rendered.stdout,
+            error=limit_messages,
+            instruction_count=instruction_budget.instruction_count,
+            loop_count=instruction_budget.loop_count,
         )
 
     preview = simulate_command(rendered.command)
@@ -263,6 +293,8 @@ async def run_alias_test(
             actual=None,
             stdout=rendered.stdout,
             error=preview.validation_error,
+            instruction_count=instruction_budget.instruction_count,
+            loop_count=instruction_budget.loop_count,
         )
 
     if preview.preview is not None:
@@ -292,7 +324,25 @@ async def run_alias_test(
         stdout=rendered.stdout,
         embed=embed_dict,
         details=details,
+        instruction_count=instruction_budget.instruction_count,
+        loop_count=instruction_budget.loop_count,
     )
+
+
+def _limit_messages(instruction_budget: InstructionBudget) -> str | None:
+    messages = [
+        instruction_limit_message(
+            instruction_budget.instruction_count,
+            instruction_budget.compatibility_limit,
+            hard_limit_reached=instruction_budget.hard_limit_reached,
+        ),
+        loop_limit_message(
+            instruction_budget.loop_count,
+            instruction_budget.loop_compatibility_limit,
+            hard_limit_reached=instruction_budget.loop_hard_limit_reached,
+        ),
+    ]
+    return "\n".join(message for message in messages if message) or None
 
 
 def _split_command(command: str, path: Path) -> list[str]:

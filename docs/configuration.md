@@ -15,6 +15,10 @@ The language server reads a workspace-level `.avraels.json` file to shape diagno
     "semanticLevel": "warning",
     "runtimeLevel": "error"
   },
+  "testing": {
+    "logInstructionCounts": false,
+    "logLoopCounts": false
+  },
   "varFiles": [
     ".avrae-vars.json",
     "profiles/gm-vars.json"
@@ -90,6 +94,8 @@ The language server reads a workspace-level `.avraels.json` file to shape diagno
 - `enableGvarFetch`: Opt-in to fetch gvars from Avrae using `avraeService.token` when diagnostics/commands encounter `get_gvar`. When disabled, only locally provided gvars are used.
 - `avraeService.baseUrl` / `token`: Host and bearer token for gvar fetches.
 - `diagnostics.semanticLevel` / `runtimeLevel`: How LSP diagnostics are reported (`error`, `warning`, `information`, `hint`).
+- `testing.logInstructionCounts`: When true, `--run-tests` prints the instruction count for every alias and gvar test. Tests always enforce Avrae's 100,000-instruction limit; test execution uses a 200,000-instruction safety cap so over-limit failures can report useful usage.
+- `testing.logLoopCounts`: When true, `--run-tests` prints the loop count for every alias and gvar test. Tests always enforce Avrae's 10,000-loop compatibility limit; test execution uses a 20,000-loop safety cap so over-limit failures can report useful usage.
 - `varFiles`: Additional JSON files merged into `vars` for the active profile; workspace-relative unless absolute. Each file uses the same shape as `vars` below. For `gvars`, values can be inline strings, `{ "value": "..." }`, or `{ "filePath": "..." }` / `{ "path": "..." }` to load content from another file (relative to the var file). Add `"scriptWritable": true` to either object form to allow `set_gvar(...)` in the mock runtime.
 - `profiles`: Named context profiles. Each profile can override `ctx`, `combat`, `character`, `vars`, and optionally `description`.
 - `defaultProfile`: Which profile is selected when the server starts.

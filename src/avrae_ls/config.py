@@ -25,6 +25,12 @@ class DiagnosticSettings:
 
 
 @dataclass
+class TestSettings:
+    log_instruction_counts: bool = False
+    log_loop_counts: bool = False
+
+
+@dataclass
 class AvraeServiceConfig:
     base_url: str = "https://api.avrae.io"
     token: str | None = None
@@ -88,6 +94,7 @@ class AvraeLSConfig:
     default_profile: str = "default"
     profiles: Dict[str, ContextProfile] = field(default_factory=dict)
     diagnostics: DiagnosticSettings = field(default_factory=DiagnosticSettings)
+    testing: TestSettings = field(default_factory=TestSettings)
 
     @classmethod
     def default(cls, workspace_root: Path) -> "AvraeLSConfig":
@@ -462,6 +469,11 @@ def load_config(
         semantic_level=str(diag_cfg.get("semanticLevel") or "warning").lower(),
         runtime_level=str(diag_cfg.get("runtimeLevel") or "error").lower(),
     )
+    testing_cfg = raw.get("testing") or {}
+    testing = TestSettings(
+        log_instruction_counts=bool(testing_cfg.get("logInstructionCounts", False)),
+        log_loop_counts=bool(testing_cfg.get("logLoopCounts", False)),
+    )
 
     var_files = tuple(
         _resolve_var_file(workspace_root, file_path)
@@ -502,6 +514,7 @@ def load_config(
         default_profile=default_profile,
         profiles=profiles,
         diagnostics=diagnostics,
+        testing=testing,
     )
     return cfg, warnings
 

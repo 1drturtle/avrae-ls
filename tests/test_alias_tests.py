@@ -6,7 +6,7 @@ from avrae_ls.testing.alias_tests import AliasTestError, parse_alias_tests, run_
 from avrae_ls.__main__ import _run_alias_tests, main
 from avrae_ls.config import AvraeLSConfig, ContextProfile, VarSources
 from avrae_ls.runtime.context import ContextBuilder
-from avrae_ls.runtime.runtime import MockExecutor
+from avrae_ls.runtime.runtime import InstructionBudget, MockExecutor
 
 
 def _profile_like(config: AvraeLSConfig, name: str, *, character_name: str, hp: str | None = None) -> ContextProfile:
@@ -40,6 +40,94 @@ async def test_runs_simple_alias_test(tmp_path):
 
     assert result.passed
     assert result.actual == "hi 3"
+
+
+@pytest.mark.asyncio
+async def test_alias_tests_fail_after_soft_limit_and_continue(monkeypatch, tmp_path):
+    class TinyInstructionBudget(InstructionBudget):
+        def __init__(self):
+            super().__init__(compatibility_limit=3, hard_limit=12)
+
+    monkeypatch.setattr("avrae_ls.testing.alias_tests.InstructionBudget", TinyInstructionBudget)
+    (tmp_path / "count.alias").write_text("!alias count echo <drac2>1</drac2> <drac2>2</drac2>")
+    (tmp_path / "hello.alias").write_text("!alias hello echo <drac2>1</drac2>")
+    (tmp_path / "count.alias-test").write_text('!count\n---\n1 2\n\n!hello\n---\n"1"\n')
+    config = AvraeLSConfig.default(tmp_path)
+
+    results = await run_alias_tests(
+        parse_alias_tests(tmp_path / "count.alias-test"), ContextBuilder(config), MockExecutor()
+    )
+
+    assert len(results) == 2
+    assert not results[0].passed
+    assert "Instruction limit exceeded: 4 / 3" in (results[0].error or "")
+    assert results[1].passed
+
+
+@pytest.mark.asyncio
+async def test_alias_test_reports_hard_instruction_limit(monkeypatch, tmp_path):
+    class TinyInstructionBudget(InstructionBudget):
+        def __init__(self):
+            super().__init__(compatibility_limit=1, hard_limit=3)
+
+    monkeypatch.setattr("avrae_ls.testing.alias_tests.InstructionBudget", TinyInstructionBudget)
+    (tmp_path / "limit.alias").write_text("!alias limit echo <drac2>1 + 2</drac2>")
+    test_path = tmp_path / "limit.alias-test"
+    test_path.write_text('!limit\n---\n"3"\n')
+    config = AvraeLSConfig.default(tmp_path)
+
+    result = (await run_alias_tests(parse_alias_tests(test_path), ContextBuilder(config), MockExecutor()))[0]
+
+    assert not result.passed
+    assert "Test stopped at safety limit: at least 4 / 1" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_alias_test_reports_loop_limit_and_continues(monkeypatch, tmp_path):
+    class TinyLoopBudget(InstructionBudget):
+        def __init__(self):
+            super().__init__(loop_compatibility_limit=1, loop_hard_limit=3)
+
+    monkeypatch.setattr("avrae_ls.testing.alias_tests.InstructionBudget", TinyLoopBudget)
+    (tmp_path / "loop.alias").write_text("!alias loop echo <drac2>\nfor i in range(2):\n    pass\nreturn 2\n</drac2>")
+    (tmp_path / "hello.alias").write_text("!alias hello echo <drac2>1</drac2>")
+    test_path = tmp_path / "loop.alias-test"
+    test_path.write_text('!loop\n---\n"2"\n\n!hello\n---\n"1"\n')
+    config = AvraeLSConfig.default(tmp_path)
+
+    results = await run_alias_tests(parse_alias_tests(test_path), ContextBuilder(config), MockExecutor())
+
+    assert not results[0].passed
+    assert results[0].loop_count == 2
+    assert "Loop limit exceeded: 2 / 1" in (results[0].error or "")
+    assert results[1].passed
+
+
+def test_cli_prints_configured_loop_counts_without_info_log_level(tmp_path, capsys):
+    (tmp_path / ".avraels.json").write_text('{"testing": {"logLoopCounts": true}}')
+    (tmp_path / "loop.alias").write_text("!alias loop echo <drac2>\nfor i in range(1):\n    pass\nreturn 1\n</drac2>")
+    test_path = tmp_path / "loop.alias-test"
+    test_path.write_text('!loop\n---\n"1"\n')
+
+    exit_code = _run_alias_tests([test_path])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Loops: 1 / 10,000" in captured.out
+    assert "Instructions:" not in captured.out
+
+
+def test_cli_prints_configured_instruction_counts_without_info_log_level(tmp_path, capsys):
+    (tmp_path / ".avraels.json").write_text('{"testing": {"logInstructionCounts": true}}')
+    (tmp_path / "hello.alias").write_text("!alias hello echo <drac2>1</drac2>")
+    test_path = tmp_path / "hello.alias-test"
+    test_path.write_text('!hello\n---\n"1"\n')
+
+    exit_code = _run_alias_tests([test_path])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Instructions: 2 / 100,000" in captured.out
 
 
 @pytest.mark.asyncio
