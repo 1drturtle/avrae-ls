@@ -515,6 +515,8 @@ class MockExecutor:
         touched_gvars: set[str] | None = None,
     ) -> Dict[str, Any]:
         builtins = dict(self._base_builtins)
+        if ctx_data.time is not None:
+            builtins["time"] = lambda: ctx_data.time
         var_store = ctx_data.vars
         interpreter_ref = interpreter_ref or {"interpreter": None}
         import_cache = import_cache or {}

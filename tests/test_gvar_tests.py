@@ -109,6 +109,35 @@ def test_parse_gvar_tests_reads_profile_metadata(tmp_path):
     assert case.profile == "gm"
 
 
+def test_parse_gvar_tests_reads_time_metadata(tmp_path):
+    gvar_path = tmp_path / "clock.gvar"
+    gvar_path.write_text("value = time()\n")
+    test_path = tmp_path / "clock.gvar-test"
+    test_path.write_text("return clock.value\n---\n123.5\n---\ntime: 123.5\n")
+
+    case = parse_gvar_tests(test_path)[0]
+
+    assert case.time == 123.5
+
+
+@pytest.mark.asyncio
+async def test_gvar_test_time_metadata_overrides_profile_time(tmp_path):
+    gvar_path = tmp_path / "clock.gvar"
+    gvar_path.write_text("value = time()\n")
+    test_path = tmp_path / "clock.gvar-test"
+    test_path.write_text("return clock.value\n---\n123.5\n---\ntime: 123.5\n")
+
+    config = AvraeLSConfig.default(tmp_path)
+    config.profiles["default"].time = 456.0
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    case = parse_gvar_tests(test_path)[0]
+    result = (await run_gvar_tests([case], builder, executor))[0]
+
+    assert result.passed
+
+
 @pytest.mark.asyncio
 async def test_gvar_tests_normalize_hyphenated_binding_name(tmp_path):
     gvar_path = tmp_path / "foo-bar.gvar"

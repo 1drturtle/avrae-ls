@@ -99,6 +99,25 @@ def test_load_config_profiles_overlay_builtin_defaults(tmp_path: Path):
     assert gm_profile.ctx["author"]["display_name"] == "Aelar Wyn"
 
 
+def test_load_config_profile_fixed_time(tmp_path: Path):
+    _write_config(tmp_path, {"profiles": {"default": {"time": 1735689600.5}}})
+
+    cfg, warnings = load_config(tmp_path)
+
+    assert warnings == []
+    assert cfg.profiles["default"].time == 1735689600.5
+
+
+@pytest.mark.parametrize("value", [True, "1735689600", float("nan"), float("inf")])
+def test_load_config_invalid_profile_fixed_time_warns(tmp_path: Path, value: object):
+    _write_config(tmp_path, {"profiles": {"default": {"time": value}}})
+
+    cfg, warnings = load_config(tmp_path)
+
+    assert cfg.profiles["default"].time is None
+    assert any("profiles.default.time" in warning for warning in warnings)
+
+
 def test_load_config_testing_instruction_logging(tmp_path: Path):
     _write_config(tmp_path, {"testing": {"logInstructionCounts": True, "logLoopCounts": True}})
 

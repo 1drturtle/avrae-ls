@@ -1,0 +1,246 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Avrae Language Server configuration",
+  "description": "Workspace configuration for avrae-ls. Values support $NAME and ${NAME} environment-variable substitution.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "enableGvarFetch": {
+      "type": "boolean",
+      "default": false,
+      "description": "Fetch missing gvars from Avrae when avraeService.token is configured."
+    },
+    "avraeService": {
+      "$ref": "#/definitions/avraeService"
+    },
+    "diagnostics": {
+      "$ref": "#/definitions/diagnostics"
+    },
+    "testing": {
+      "$ref": "#/definitions/testing"
+    },
+    "varFiles": {
+      "type": "array",
+      "description": "Workspace-relative or absolute JSON var-file paths, merged into the active profile.",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+    "profiles": {
+      "type": "object",
+      "description": "Named mock-runtime context profiles.",
+      "additionalProperties": {
+        "$ref": "#/definitions/profile"
+      },
+      "default": {}
+    },
+    "defaultProfile": {
+      "type": "string",
+      "default": "default",
+      "description": "Name of the profile selected when the server starts."
+    }
+  },
+  "definitions": {
+    "avraeService": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "baseUrl": {
+          "type": "string",
+          "format": "uri",
+          "default": "https://api.avrae.io",
+          "description": "Base URL of the Avrae service used to fetch gvars."
+        },
+        "token": {
+          "type": "string",
+          "description": "Bearer token for Avrae service gvar requests."
+        }
+      }
+    },
+    "diagnosticLevel": {
+      "type": "string",
+      "enum": [
+        "error",
+        "warning",
+        "information",
+        "hint"
+      ]
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "semanticLevel": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/diagnosticLevel"
+            }
+          ],
+          "default": "warning",
+          "description": "Severity for semantic diagnostics."
+        },
+        "runtimeLevel": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/diagnosticLevel"
+            }
+          ],
+          "default": "error",
+          "description": "Severity for mock-runtime diagnostics."
+        }
+      }
+    },
+    "testing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "logInstructionCounts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Print instruction counts when running alias tests."
+        },
+        "logLoopCounts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Print loop counts when running alias tests."
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of this context profile."
+        },
+        "time": {
+          "type": "number",
+          "description": "Fixed Unix-epoch seconds returned by time(). Omit to use live time."
+        },
+        "ctx": {
+          "$ref": "#/definitions/contextData"
+        },
+        "combat": {
+          "$ref": "#/definitions/mockData"
+        },
+        "character": {
+          "$ref": "#/definitions/mockData"
+        },
+        "vars": {
+          "$ref": "#/definitions/varSources"
+        }
+      }
+    },
+    "contextData": {
+      "type": "object",
+      "description": "Partial mock ctx data. Values are merged with the built-in profile.",
+      "additionalProperties": true,
+      "properties": {
+        "guild": {
+          "$ref": "#/definitions/mockData"
+        },
+        "channel": {
+          "$ref": "#/definitions/mockData"
+        },
+        "author": {
+          "$ref": "#/definitions/mockData"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "alias": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        }
+      }
+    },
+    "mockData": {
+      "type": "object",
+      "description": "Partial mock data. Unrecognized fields are passed through to the runtime context.",
+      "additionalProperties": true
+    },
+    "varSources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cvars": {
+          "$ref": "#/definitions/variableMap"
+        },
+        "uvars": {
+          "$ref": "#/definitions/variableMap"
+        },
+        "svars": {
+          "$ref": "#/definitions/variableMap"
+        },
+        "gvars": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/gvar"
+          },
+          "default": {}
+        }
+      }
+    },
+    "variableMap": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "gvar": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Inline draconic module source."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "type": "string",
+              "description": "Inline draconic module source."
+            },
+            "filePath": {
+              "type": "string",
+              "description": "Path to a file containing the draconic module source."
+            },
+            "path": {
+              "type": "string",
+              "description": "Alias for filePath."
+            },
+            "scriptWritable": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow set_gvar() to update this mock gvar during execution."
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "required": [
+                "filePath"
+              ]
+            },
+            {
+              "required": [
+                "path"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

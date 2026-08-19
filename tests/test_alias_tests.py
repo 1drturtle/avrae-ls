@@ -355,6 +355,27 @@ def test_parse_alias_tests_reads_profile_metadata(tmp_path):
     assert case.profile == "gm"
 
 
+def test_parse_alias_tests_reads_time_metadata(tmp_path):
+    alias_path = tmp_path / "clock.alias"
+    alias_path.write_text("!alias clock echo {{time()}}")
+    test_path = tmp_path / "test-clock.alias-test"
+    test_path.write_text('!clock\n---\n"123.5"\n---\ntime: 123.5\n')
+
+    case = parse_alias_tests(test_path)[0]
+
+    assert case.time == 123.5
+
+
+def test_parse_alias_tests_rejects_invalid_time_metadata(tmp_path):
+    alias_path = tmp_path / "clock.alias"
+    alias_path.write_text("!alias clock echo {{time()}}")
+    test_path = tmp_path / "test-clock.alias-test"
+    test_path.write_text("!clock\n---\n123\n---\ntime: '123'\n")
+
+    with pytest.raises(AliasTestError, match="metadata key 'time'"):
+        parse_alias_tests(test_path)
+
+
 @pytest.mark.asyncio
 async def test_alias_tests_support_regex_expected(tmp_path):
     alias_path = tmp_path / "greet.alias"
@@ -368,6 +389,24 @@ async def test_alias_tests_support_regex_expected(tmp_path):
 
     case = parse_alias_tests(test_path)[0]
     result = (await run_alias_tests([case], builder, executor))[0]
+    assert result.passed
+
+
+@pytest.mark.asyncio
+async def test_alias_test_time_metadata_overrides_profile_time(tmp_path):
+    alias_path = tmp_path / "clock.alias"
+    alias_path.write_text("!alias clock echo {{time()}}")
+    test_path = tmp_path / "test-clock.alias-test"
+    test_path.write_text('!clock\n---\n"123.5"\n---\ntime: 123.5\n')
+
+    config = AvraeLSConfig.default(tmp_path)
+    config.profiles["default"].time = 456.0
+    builder = ContextBuilder(config)
+    executor = MockExecutor(config.service)
+
+    case = parse_alias_tests(test_path)[0]
+    result = (await run_alias_tests([case], builder, executor))[0]
+
     assert result.passed
 
 

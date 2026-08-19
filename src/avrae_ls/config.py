@@ -18,6 +18,18 @@ class ConfigError(Exception):
     """Raised when a workspace config file cannot be parsed."""
 
 
+def parse_fixed_time(value: Any) -> float | None:
+    """Validate an optional Unix-epoch timestamp used by the mock runtime."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("must be a finite number of Unix-epoch seconds")
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("must be a finite number of Unix-epoch seconds")
+    return parsed
+
+
 @dataclass
 class DiagnosticSettings:
     semantic_level: str = "warning"
@@ -82,6 +94,7 @@ class ContextProfile:
     character: Dict[str, Any] = field(default_factory=dict)
     vars: VarSources = field(default_factory=VarSources)
     description: str = ""
+    time: float | None = None
 
 
 @dataclass
@@ -488,6 +501,11 @@ def load_config(
     raw_profiles = raw.get("profiles") or {}
     for name, data in raw_profiles.items():
         source_profile = base.profiles.get(name, base_profile)
+        try:
+            profile_time = parse_fixed_time(data.get("time"))
+        except ValueError as exc:
+            warnings.append(f"profiles.{name}.time {exc}; using live time.")
+            profile_time = None
         profiles[name] = ContextProfile(
             name=name,
             ctx=_merge_mapping(source_profile.ctx, data.get("ctx") or {}),
@@ -495,6 +513,7 @@ def load_config(
             character=_merge_mapping(source_profile.character, data.get("character") or {}),
             vars=source_profile.vars.merge(VarSources.from_data(data.get("vars"))),
             description=str(data.get("description") or source_profile.description),
+            time=profile_time,
         )
 
     default_profile = str(raw.get("defaultProfile") or "default")

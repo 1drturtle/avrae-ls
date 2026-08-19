@@ -98,6 +98,7 @@ class ContextData:
     combat: Dict[str, Any] = field(default_factory=dict)
     character: Dict[str, Any] = field(default_factory=dict)
     vars: VarSources = field(default_factory=VarSources)
+    time: float | None = None
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,7 @@ class ContextBuilder:
             combat=combat,
             character=profile_character,
             vars=merged_vars,
+            time=profile.time,
         )
         self._baseline_cache[cache_key] = _BaselineCacheEntry(context=baseline, var_file_sig=var_file_sig)
         log.debug(
@@ -170,6 +172,7 @@ class ContextBuilder:
             combat=_fast_clone(baseline.combat),
             character=_fast_clone(baseline.character),
             vars=vars_copy,
+            time=baseline.time,
         )
         log.debug("Context clone built in %.2fms", (time.perf_counter() - started) * 1000)
         return ctx_data

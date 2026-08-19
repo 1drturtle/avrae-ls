@@ -42,6 +42,7 @@ class AliasTestCase:
     expected: Any
     var_overrides: dict[str, Any] | None = None
     character_overrides: dict[str, Any] | None = None
+    time: float | None = None
 
     @property
     def target_kind(self) -> str:
@@ -141,6 +142,7 @@ def parse_alias_tests(path: Path) -> list[AliasTestCase]:
                 expected=expected,
                 var_overrides=meta.var_overrides,
                 character_overrides=meta.character_overrides,
+                time=meta.time,
             )
         )
     return cases
@@ -228,6 +230,8 @@ async def run_alias_test(
     if base_context is None:
         base_context = builder.build_baseline(case.profile)
     ctx_data = builder.build_from_baseline(base_context)
+    if case.time is not None:
+        ctx_data.time = case.time
     if case.var_overrides:
         ctx_data.vars = ctx_data.vars.merge(VarSources.from_data(case.var_overrides))
         ctx_data.vars.gvars = normalize_gvars(

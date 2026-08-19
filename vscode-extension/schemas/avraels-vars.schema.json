@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Avrae Language Server var-file configuration",
+  "description": "Variable values loaded through the varFiles setting in .avraels.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "cvars": {
+      "$ref": "#/definitions/variableMap"
+    },
+    "uvars": {
+      "$ref": "#/definitions/variableMap"
+    },
+    "svars": {
+      "$ref": "#/definitions/variableMap"
+    },
+    "gvars": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/gvar"
+      },
+      "default": {}
+    }
+  },
+  "definitions": {
+    "variableMap": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "gvar": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Inline draconic module source."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "type": "string",
+              "description": "Inline draconic module source."
+            },
+            "filePath": {
+              "type": "string",
+              "description": "Path to a file containing the draconic module source."
+            },
+            "path": {
+              "type": "string",
+              "description": "Alias for filePath."
+            },
+            "scriptWritable": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow set_gvar() to update this mock gvar during execution."
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "required": [
+                "filePath"
+              ]
+            },
+            {
+              "required": [
+                "path"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

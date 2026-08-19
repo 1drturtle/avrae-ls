@@ -473,6 +473,21 @@ async def test_using_prefetches_literal(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_fixed_context_time_is_used_by_main_and_imported_module(tmp_path):
+    cfg = AvraeLSConfig.default(tmp_path)
+    resolver = GVarResolver(cfg)
+    resolver.seed({"module": "value = time()"})
+    ctx = _ctx()
+    ctx.time = 123.5
+    executor = MockExecutor()
+
+    result = await executor.run("using(mod='module')\nreturn [time(), time(), mod.value]", ctx, resolver)
+
+    assert result.error is None
+    assert result.value == [123.5, 123.5, 123.5]
+
+
+@pytest.mark.asyncio
 async def test_using_missing_gvar_errors(tmp_path):
     from avrae_ls.config import AvraeLSConfig
 

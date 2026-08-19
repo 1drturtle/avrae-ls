@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from avrae_ls.config import parse_fixed_time
+
 MISSING_VALUE = "<missing>"
 
 
@@ -53,6 +55,7 @@ class TestMetadata:
     profile: str | None = None
     var_overrides: dict[str, Any] | None = None
     character_overrides: dict[str, Any] | None = None
+    time: float | None = None
 
 
 def parse_expected_value(raw: str) -> Any:
@@ -74,11 +77,16 @@ def parse_test_metadata(raw: str, path_label: str) -> TestMetadata:
     profile = meta.get("profile")
     var_overrides = meta.get("vars")
     character_overrides = meta.get("character")
+    try:
+        fixed_time = parse_fixed_time(meta.get("time"))
+    except ValueError as exc:
+        raise ValueError(f"{path_label} metadata key 'time' {exc}") from exc
     return TestMetadata(
         name=str(name) if name is not None else None,
         profile=str(profile) if profile is not None else None,
         var_overrides=var_overrides if isinstance(var_overrides, dict) else None,
         character_overrides=character_overrides if isinstance(character_overrides, dict) else None,
+        time=fixed_time,
     )
 
 

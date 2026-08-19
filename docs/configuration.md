@@ -26,6 +26,7 @@ The language server reads a workspace-level `.avraels.json` file to shape diagno
   "profiles": {
     "default": {
       "description": "Everyday adventuring profile for Aelar.",
+      "time": 1735689600.5,
       "ctx": {
         "guild": { "id": 123456789012345678, "name": "Fabled Realms" },
         "channel": {
@@ -97,7 +98,7 @@ The language server reads a workspace-level `.avraels.json` file to shape diagno
 - `testing.logInstructionCounts`: When true, `--run-tests` prints the instruction count for every alias and gvar test. Tests always enforce Avrae's 100,000-instruction limit; test execution uses a 200,000-instruction safety cap so over-limit failures can report useful usage.
 - `testing.logLoopCounts`: When true, `--run-tests` prints the loop count for every alias and gvar test. Tests always enforce Avrae's 10,000-loop compatibility limit; test execution uses a 20,000-loop safety cap so over-limit failures can report useful usage.
 - `varFiles`: Additional JSON files merged into `vars` for the active profile; workspace-relative unless absolute. Each file uses the same shape as `vars` below. For `gvars`, values can be inline strings, `{ "value": "..." }`, or `{ "filePath": "..." }` / `{ "path": "..." }` to load content from another file (relative to the var file). Add `"scriptWritable": true` to either object form to allow `set_gvar(...)` in the mock runtime.
-- `profiles`: Named context profiles. Each profile can override `ctx`, `combat`, `character`, `vars`, and optionally `description`.
+- `profiles`: Named context profiles. Each profile can override `ctx`, `combat`, `character`, `vars`, and optionally `description` and `time`. `time`'s value replaces the output of `time()` (float)
 - `defaultProfile`: Which profile is selected when the server starts.
 
 ### Var file example

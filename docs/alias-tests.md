@@ -164,6 +164,7 @@ Add a second `---` to include metadata. Supported keys:
 - `profile`: which `.avraels.json` profile to run this specific test against.
 - `vars`: per-test overrides for `cvars`, `uvars`, `svars`, and `gvars`. Gvar overrides can use inline strings, `{ value: ... }`, or `{ filePath: ... }`, and may include `scriptWritable: true`.
 - `character`: values merged into the mock character.
+- `time`: finite Unix-epoch timestamp to return from `time()` for this test. It overrides the selected profile's `time`; omit it to use that profile's setting (or the live clock).
 
 ```
 !damage 5
@@ -179,6 +180,7 @@ character:
   name: "Test Paladin"
   stats:
     strength: 18
+time: 1735689600
 ```
 
 ### Run-only tests (no expected output)
