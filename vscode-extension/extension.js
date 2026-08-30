@@ -4,12 +4,14 @@ const { accessSync, constants } = require("fs");
 const path = require("path");
 const { LanguageClient, TransportKind, Executable } = require("vscode-languageclient/node");
 const { bundledSitePackages, isCompatiblePythonVersion, resolveServerLaunch } = require("./server-launcher");
+const { buildRunTestsInvocation, isTestFilePath, runTestFile } = require("./test-runner");
 
 let client;
 let previewPanel;
 let previewArgsState = "";
 let lastPreviewDocument = undefined;
 let dracPreviewDecoration;
+let testResultsChannel;
 
 async function activate(context) {
   const configuredServerPath = vscode.workspace.getConfiguration("avraeLS").get("server.path", "");
@@ -67,6 +69,52 @@ async function activate(context) {
   );
 
   context.subscriptions.push(client.start());
+
+  testResultsChannel = vscode.window.createOutputChannel("Avrae Test Results");
+  context.subscriptions.push(testResultsChannel);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("avrae-ls.runTestFile", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.uri.scheme !== "file" || !isTestFilePath(editor.document.uri.fsPath)) {
+        vscode.window.showWarningMessage(
+          "Run Test File is only available for saved .alias-test, .aliastest, .gvar-test, or .gvartest files."
+        );
+        return;
+      }
+
+      const document = editor.document;
+      if (!await document.save()) {
+        vscode.window.showWarningMessage("Save the test file before running it.");
+        return;
+      }
+
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+      const cwd = workspaceFolder ? workspaceFolder.uri.fsPath : path.dirname(document.uri.fsPath);
+      const invocation = buildRunTestsInvocation(serverLaunch, document.uri.fsPath, cwd);
+      testResultsChannel.clear();
+      testResultsChannel.appendLine(`Running: ${invocation.command} ${invocation.args.join(" ")}`);
+      testResultsChannel.appendLine("");
+      testResultsChannel.show(true);
+
+      const result = await runTestFile(invocation);
+      if (result.stdout) testResultsChannel.append(result.stdout);
+      if (result.stderr) {
+        if (result.stdout && !result.stdout.endsWith("\n")) testResultsChannel.appendLine("");
+        testResultsChannel.append(result.stderr);
+      }
+      if (result.launchError) {
+        testResultsChannel.appendLine(`\nFailed to launch test runner: ${result.launchError.message}`);
+        vscode.window.showErrorMessage("Avrae test runner could not be started. See Avrae Test Results for details.");
+        return;
+      }
+      if (result.exitCode === 0) {
+        vscode.window.showInformationMessage("Avrae test file passed.");
+      } else {
+        vscode.window.showErrorMessage("Avrae test file failed. See Avrae Test Results for details.");
+      }
+    })
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("avrae-ls.runAlias", async () => {

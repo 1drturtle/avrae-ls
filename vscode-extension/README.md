@@ -6,6 +6,10 @@ The bundled server requires Python 3.11 or newer: the extension starts `python3 
 
 Configure `.avraels.json` in your workspace (see the repo README) to supply tokens or local var files if you need gvar/import support.
 
+## Run a test file
+
+Open a saved `.alias-test`, `.aliastest`, `.gvar-test`, or `.gvartest` file and run `Avrae: Run Test File` from the Command Palette. The command saves the active file, runs only that file with the existing `avrae-ls --run-tests` CLI, and opens the complete report in the `Avrae Test Results` output window.
+
 ## Mock vs. live Avrae caveats
 
 - Mock runs are local-only: `set_cvar`/`set_uvar`/`get_gvar` changes do not persist to Avrae; each preview/run resets state.

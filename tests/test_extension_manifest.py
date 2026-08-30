@@ -13,6 +13,17 @@ def test_vscode_extension_exposes_refresh_gvars_command():
     assert "onCommand:avrae-ls.refreshGvars" in activations
 
 
+def test_vscode_extension_exposes_run_test_file_command():
+    manifest_path = Path("vscode-extension/package.json")
+    manifest = json.loads(manifest_path.read_text())
+
+    commands = {cmd["command"] for cmd in manifest.get("contributes", {}).get("commands", [])}
+    activations = set(manifest.get("activationEvents", []))
+
+    assert "avrae-ls.runTestFile" in commands
+    assert "onCommand:avrae-ls.runTestFile" in activations
+
+
 def test_vscode_extension_exposes_server_path_override():
     manifest_path = Path("vscode-extension/package.json")
     manifest = json.loads(manifest_path.read_text())

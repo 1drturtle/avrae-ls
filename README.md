@@ -10,6 +10,7 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
 - Python 3.11 or newer must be available as `python3` on macOS/Linux or `python` on Windows. The extension uses that interpreter only to run its bundled server package.
 - To use a development or custom server instead, set `avraeLS.server.path` to the absolute path of an `avrae-ls` executable (for example, a virtual environment's `bin/avrae-ls`). A configured path takes precedence over the bundled server.
 - Open your alias workspace; commands like `Avrae: Show Alias Preview` and `Avrae: Run Alias` will be available.
+- With a `.alias-test`, `.aliastest`, `.gvar-test`, or `.gvartest` file active, run `Avrae: Run Test File` from the Command Palette. The extension saves the file, runs that file only, and shows the full report in the `Avrae Test Results` output window.
 - Files ending with `.alias-module` are treated as full-file draconic modules under the `avrae-module` language id (no `<drac2>` tags; mock run/preview commands stay tied to `.alias` files).
 
 ## Install Just the LSP
@@ -108,7 +109,7 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
     :major-modes '(fundamental-mode)  ;; bind to your Avrae alias mode
     :server-id 'avrae-ls))
   ```
-- VS Code commands to mirror: `Avrae: Run Alias (Mock)`, `Avrae: Show Alias Preview`, `Avrae: Refresh GVARs`, and `Avrae: Reload Workspace Config` run against the same server binary.
+- VS Code commands to mirror: `Avrae: Run Alias (Mock)`, `Avrae: Run Test File`, `Avrae: Show Alias Preview`, `Avrae: Refresh GVARs`, and `Avrae: Reload Workspace Config` run against the same server binary.
 
 ## Releasing (maintainers)
 
