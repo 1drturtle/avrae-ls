@@ -3,6 +3,11 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { bundledSitePackages, isCompatiblePythonVersion, resolveServerLaunch } = require("../server-launcher");
+const { gvarIdFromUriPath } = require("../gvar-uri");
+
+test("decodes remote gvar ids from virtual document paths", () => {
+  assert.equal(gvarIdFromUriPath("/gvar/remote%2Fmodule.gvar"), "remote/module");
+});
 
 test("uses the bundled package with the platform Python command", () => {
   const launch = resolveServerLaunch({

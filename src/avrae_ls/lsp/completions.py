@@ -14,6 +14,8 @@ from avrae_ls.lsp.signature_help import FunctionSig
 from avrae_ls.analysis.type_inference import annotation_label, infer_type_map, resolve_type_name
 from avrae_ls.analysis.type_system import display_type_label, is_safe_call, type_meta
 from avrae_ls.analysis.ast_utils import collect_target_names
+from avrae_ls.analysis.symbols import build_symbol_table
+from avrae_ls.analysis.module_symbols import ModuleSymbol
 
 
 IDENT_RE = re.compile(r"[A-Za-z_]\w*$")
@@ -79,10 +81,26 @@ def completion_items_for_position(
     line: int,
     character: int,
     suggestions: Iterable[Suggestion],
+    module_symbols: dict[str, ModuleSymbol] | None = None,
 ) -> List[types.CompletionItem]:
     attr_ctx = _attribute_receiver_and_prefix(code, line, character)
     if attr_ctx:
         receiver, attr_prefix = attr_ctx
+        qualified_prefix = f"{receiver}."
+        imported = module_symbols or {}
+        imported_items = [
+            types.CompletionItem(
+                label=name.removeprefix(qualified_prefix),
+                kind=symbol.entry.kind,
+                detail=f"from gvar {symbol.gvar_id}",
+            )
+            for name, symbol in imported.items()
+            if name.startswith(qualified_prefix)
+            and "." not in name.removeprefix(qualified_prefix)
+            and (not attr_prefix or name.removeprefix(qualified_prefix).startswith(attr_prefix))
+        ]
+        if imported_items:
+            return imported_items
         sanitized = _sanitize_incomplete_line(code, line, character)
         type_map = infer_type_map(sanitized, line)
         return _attribute_completions(receiver, attr_prefix, sanitized, type_map)
@@ -91,6 +109,13 @@ def completion_items_for_position(
     prefix = _current_prefix(line_text)
     items: list[types.CompletionItem] = []
     seen: set[str] = set()
+    for entry in build_symbol_table(code).entries:
+        if entry.range.start.line > line or entry.name in seen:
+            continue
+        if prefix and not entry.name.startswith(prefix):
+            continue
+        items.append(types.CompletionItem(label=entry.name, kind=entry.kind, detail="local"))
+        seen.add(entry.name)
     func_ctx = _function_context_at_line(code, line)
     type_map = infer_type_map(code, line) if func_ctx else {}
     for name in func_ctx.params if func_ctx else []:

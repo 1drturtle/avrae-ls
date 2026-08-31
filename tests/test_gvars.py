@@ -5,6 +5,7 @@ import pytest
 
 from avrae_ls.config import AvraeLSConfig
 from avrae_ls.runtime.context import (
+    GVAR_SOURCE_PATH_KEY,
     GVAR_SCRIPT_WRITABLE_KEY,
     GVAR_VALUE_KEY,
     ContextBuilder,
@@ -239,8 +240,16 @@ def test_context_builder_loads_gvar_from_file_path(tmp_path: Path):
 
     ctx = builder.build()
 
-    assert ctx.vars.gvars["mod123"] == {GVAR_VALUE_KEY: "answer = 42\n", GVAR_SCRIPT_WRITABLE_KEY: False}
-    assert ctx.vars.gvars["mod456"] == {GVAR_VALUE_KEY: "answer = 84\n", GVAR_SCRIPT_WRITABLE_KEY: False}
+    assert ctx.vars.gvars["mod123"] == {
+        GVAR_VALUE_KEY: "answer = 42\n",
+        GVAR_SCRIPT_WRITABLE_KEY: False,
+        GVAR_SOURCE_PATH_KEY: str(gvar_file),
+    }
+    assert ctx.vars.gvars["mod456"] == {
+        GVAR_VALUE_KEY: "answer = 84\n",
+        GVAR_SCRIPT_WRITABLE_KEY: False,
+        GVAR_SOURCE_PATH_KEY: str(gvar_file_alt),
+    }
     assert builder.gvar_resolver.get_local("mod123") == "answer = 42\n"
 
 
@@ -291,7 +300,11 @@ def test_context_builder_preserves_script_writable_on_gvar_entries(tmp_path: Pat
     ctx = ContextBuilder(cfg).build()
 
     assert ctx.vars.gvars["inline"] == {GVAR_VALUE_KEY: "return 1", GVAR_SCRIPT_WRITABLE_KEY: True}
-    assert ctx.vars.gvars["file_backed"] == {GVAR_VALUE_KEY: "answer = 42\n", GVAR_SCRIPT_WRITABLE_KEY: True}
+    assert ctx.vars.gvars["file_backed"] == {
+        GVAR_VALUE_KEY: "answer = 42\n",
+        GVAR_SCRIPT_WRITABLE_KEY: True,
+        GVAR_SOURCE_PATH_KEY: str(gvar_file),
+    }
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,14 @@ from lsprotocol import types
 from pygls.workspace import Workspace
 
 from avrae_ls.config import AvraeLSConfig
-from avrae_ls.lsp.server import AvraeLanguageServer, _runtime_diagnostic_with_source, on_completion, on_hover, run_alias
+from avrae_ls.lsp.server import (
+    AvraeLanguageServer,
+    _runtime_diagnostic_with_source,
+    on_completion,
+    on_definition,
+    on_hover,
+    run_alias,
+)
 from avrae_ls.runtime.alias_preview import render_alias_command
 from avrae_ls.runtime.context import ContextData, GVarResolver
 from avrae_ls.runtime.runtime import MockExecutor
@@ -34,6 +41,43 @@ def test_completion_round_trip_integration():
     labels = {item.label for item in items}
     assert "name" in labels
     assert "attacks" in labels
+
+
+def test_using_module_completion_and_remote_definition():
+    code = 'using(lib="remote")\nlib.heal'
+    uri = "file:///module-completion.alias"
+    server = _server_with_doc(code, uri)
+    server.state.module_resolver.seed({"remote": "def heal(target):\n    return target\nbonus = 2"})
+    completion_params = types.CompletionParams(
+        text_document=types.TextDocumentIdentifier(uri=uri),
+        position=types.Position(line=1, character=len("lib.he")),
+        context=None,
+    )
+    labels = {item.label for item in on_completion(server, completion_params)}
+    assert "heal" in labels
+    definition_params = types.DefinitionParams(
+        text_document=types.TextDocumentIdentifier(uri=uri),
+        position=types.Position(line=1, character=len("lib.heal")),
+    )
+    target = on_definition(server, definition_params)
+    assert target is not None
+    assert target.uri == "avrae-gvar://gvar/remote.gvar"
+
+
+def test_using_local_gvar_definition_opens_source_file(tmp_path: Path):
+    module = tmp_path / "library.gvar"
+    module.write_text("def heal(target):\n    return target\n")
+    code = 'using(lib="local")\nlib.heal'
+    uri = "file:///local-module.alias"
+    server = _server_with_doc(code, uri)
+    server.state.module_resolver.seed({"local": {"filePath": str(module)}})
+    params = types.DefinitionParams(
+        text_document=types.TextDocumentIdentifier(uri=uri),
+        position=types.Position(line=1, character=len("lib.heal")),
+    )
+    target = on_definition(server, params)
+    assert target is not None
+    assert target.uri == module.as_uri()
 
 
 def test_hover_round_trip_integration():

@@ -367,6 +367,13 @@ def test_function_local_in_completion_before_full_name():
     assert "local" in (item.detail or "")
 
 
+def test_top_level_symbols_complete_after_their_declaration():
+    code = "def heal(target):\n    return target\nhea"
+    items = completion_items_for_position(code, line=2, character=len("hea"), suggestions=[])
+    item = next(item for item in items if item.label == "heal")
+    assert item.kind.name == "Function"
+
+
 def test_plain_identifier_named_like_type_does_not_infer():
     code = "category = None\ncategory."
     items = completion_items_for_position(code, line=1, character=len("category."), suggestions=[])

@@ -96,6 +96,14 @@ async def test_fetches_gvar_when_enabled(tmp_path):
         pytest.param(
             "def inner():\n    y = 1\ninner()\ny", None, ["undefined"], None, None, id="function_scope_not_global"
         ),
+        pytest.param(
+            "def first():\n    return second()\n\ndef second():\n    return 1\n\nfirst()",
+            None,
+            [],
+            None,
+            None,
+            id="top_level_functions_can_reference_later_function",
+        ),
         pytest.param("get_gvar('abc')", None, ["gvar"], None, None, id="unknown_gvar"),
         pytest.param("set_gvar('abc', 'x')", None, ["gvar"], None, None, id="unknown_gvar_set"),
         pytest.param(

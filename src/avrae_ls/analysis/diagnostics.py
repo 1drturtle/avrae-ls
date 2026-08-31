@@ -101,11 +101,17 @@ class DiagnosticProvider:
     ) -> List[types.Diagnostic]:
         known: Set[str] = set(self._executor.available_names(ctx_data))
         diagnostics: list[types.Diagnostic] = []
+        # A top-level function's body is evaluated only when it is called, by
+        # which time the module has finished defining its top-level functions.
+        # Keep these separate from ``known`` so a call in module-level code
+        # still respects declaration order.
+        module_functions = {node.name for node in body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
 
         class Walker(ast.NodeVisitor):
             def __init__(self, base_known: Set[str]):
                 self._base_known = base_known
                 self._scopes: list[Set[str]] = [set()]
+                self._function_depth = 0
 
             @property
             def _current(self) -> Set[str]:
@@ -116,6 +122,8 @@ class DiagnosticProvider:
 
             def _is_defined(self, name: str) -> bool:
                 if name in self._base_known:
+                    return True
+                if self._function_depth and name in module_functions:
                     return True
                 return any(name in scope for scope in reversed(self._scopes))
 
@@ -135,11 +143,19 @@ class DiagnosticProvider:
 
             def visit_FunctionDef(self, node: ast.FunctionDef):
                 self._define([node.name])
-                self._with_new_scope(self._bind_args, node.args, node.body)
+                self._function_depth += 1
+                try:
+                    self._with_new_scope(self._bind_args, node.args, node.body)
+                finally:
+                    self._function_depth -= 1
 
             def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
                 self._define([node.name])
-                self._with_new_scope(self._bind_args, node.args, node.body)
+                self._function_depth += 1
+                try:
+                    self._with_new_scope(self._bind_args, node.args, node.body)
+                finally:
+                    self._function_depth -= 1
 
             def visit_Lambda(self, node: ast.Lambda):
                 # Defaults are evaluated when the lambda is created, before its

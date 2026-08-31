@@ -2,6 +2,7 @@ const vscode = require("vscode");
 const { execFile } = require("child_process");
 const { accessSync, constants } = require("fs");
 const path = require("path");
+const { gvarIdFromUriPath } = require("./gvar-uri");
 const { LanguageClient, TransportKind, Executable } = require("vscode-languageclient/node");
 const { bundledSitePackages, isCompatiblePythonVersion, resolveServerLaunch } = require("./server-launcher");
 const { buildRunTestsInvocation, isTestFilePath, runTestFile } = require("./test-runner");
@@ -57,6 +58,7 @@ async function activate(context) {
       { scheme: "untitled", language: "avrae" },
       { scheme: "file", language: "avrae-module" },
       { scheme: "untitled", language: "avrae-module" },
+      { scheme: "avrae-gvar", language: "avrae-module" },
     ],
     outputChannelName: "Avrae LS",
   };
@@ -66,6 +68,25 @@ async function activate(context) {
     "Avrae Draconic Alias Language Server",
     serverOptions,
     clientOptions
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider("avrae-gvar", {
+      async provideTextDocumentContent(uri) {
+        const gvarId = gvarIdFromUriPath(uri.path);
+        try {
+          const result = await client.sendRequest("workspace/executeCommand", {
+            command: "avrae.getGvarContent",
+            arguments: [{ id: gvarId }],
+          });
+          return result && typeof result.content === "string"
+            ? result.content
+            : "# Gvar content is unavailable. Refresh gvars and try again.\n";
+        } catch (err) {
+          return `# Failed to load gvar: ${err}\n`;
+        }
+      },
+    })
   );
 
   context.subscriptions.push(client.start());

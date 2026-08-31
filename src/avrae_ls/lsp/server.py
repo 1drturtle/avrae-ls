@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 import ast
@@ -13,7 +14,7 @@ from pygls import uris
 from pygls.lsp.server import LanguageServer
 
 from avrae_ls.config import AvraeLSConfig, load_config
-from avrae_ls.runtime.context import ContextBuilder
+from avrae_ls.runtime.context import ContextBuilder, GVarResolver
 from avrae_ls.analysis.diagnostics import DiagnosticProvider
 from avrae_ls.runtime.runtime import MockExecutor
 from avrae_ls.runtime.alias_preview import render_alias_command, simulate_command
@@ -30,6 +31,12 @@ from avrae_ls.analysis.symbols import (
     find_references,
     range_for_word,
 )
+from avrae_ls.analysis.module_symbols import (
+    literal_using_imports,
+    location_for_module_symbol,
+    member_at_position,
+    module_exports_for_code,
+)
 
 # Prefer package metadata so the server version matches the installed wheel.
 try:
@@ -41,6 +48,7 @@ log = logging.getLogger(__name__)
 RUN_ALIAS_COMMAND = "avrae.runAlias"
 REFRESH_CONFIG_COMMAND = "avrae.reloadConfig"
 REFRESH_GVARS_COMMAND = "avrae.refreshGvars"
+GET_GVAR_CONTENT_COMMAND = "avrae.getGvarContent"
 LEVEL_TO_SEVERITY = {
     "error": types.DiagnosticSeverity.Error,
     "warning": types.DiagnosticSeverity.Warning,
@@ -54,6 +62,7 @@ class ServerState:
     context_builder: ContextBuilder
     diagnostics: DiagnosticProvider
     executor: MockExecutor
+    module_resolver: GVarResolver
     warnings: list[str] = field(default_factory=list)
 
 
@@ -90,6 +99,7 @@ class AvraeLanguageServer(LanguageServer):
             context_builder=context_builder,
             diagnostics=diagnostics,
             executor=executor,
+            module_resolver=GVarResolver(config),
             warnings=list(warnings),
         )
         self._workspace_root = root
@@ -118,11 +128,14 @@ async def on_initialized(server: AvraeLanguageServer, params: types.InitializedP
 
 @ls.feature(types.TEXT_DOCUMENT_DID_OPEN)
 async def did_open(server: AvraeLanguageServer, params: types.DidOpenTextDocumentParams):
+    asyncio.create_task(_prefetch_modules(server, params.text_document.text))
     await _publish_diagnostics(server, params.text_document.uri)
 
 
 @ls.feature(types.TEXT_DOCUMENT_DID_CHANGE)
 async def did_change(server: AvraeLanguageServer, params: types.DidChangeTextDocumentParams):
+    doc = server.workspace.get_text_document(params.text_document.uri)
+    asyncio.create_task(_prefetch_modules(server, doc.source))
     await _publish_diagnostics(server, params.text_document.uri)
 
 
@@ -148,7 +161,17 @@ def on_document_symbol(server: AvraeLanguageServer, params: types.DocumentSymbol
 @ls.feature(types.TEXT_DOCUMENT_DEFINITION)
 def on_definition(server: AvraeLanguageServer, params: types.DefinitionParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
-    table = build_symbol_table(doc.source, treat_as_module=_is_alias_module_document(doc))
+    is_module = _is_alias_module_document(doc)
+    source_ctx = build_source_context(doc.source, is_module)
+    selected = code_for_position(source_ctx, params.position.line, params.position.character)
+    if selected is not None:
+        code, rel_line, rel_char = selected
+        member = member_at_position(code, rel_line, rel_char)
+        if member:
+            symbol = module_exports_for_code(code, server.state.module_resolver).get(member)
+            if symbol:
+                return location_for_module_symbol(symbol)
+    table = build_symbol_table(doc.source, treat_as_module=is_module)
     word = doc.word_at_position(params.position)
     rng = find_definition_range(table, word)
     if rng is None:
@@ -246,7 +269,8 @@ def on_completion(server: AvraeLanguageServer, params: types.CompletionParams):
     if selected is None:
         return []
     code, rel_line, rel_char = selected
-    return completion_items_for_position(code, rel_line, rel_char, suggestions)
+    modules = module_exports_for_code(code, server.state.module_resolver)
+    return completion_items_for_position(code, rel_line, rel_char, suggestions, modules)
 
 
 @ls.feature(types.TEXT_DOCUMENT_HOVER)
@@ -365,13 +389,44 @@ async def refresh_gvars(server: AvraeLanguageServer, *args: Any):
     ctx_data = server.state.context_builder.build(profile)
     resolver = server.state.context_builder.gvar_resolver
     snapshot = await resolver.refresh(ctx_data.vars.gvars, keys)
+    server.state.module_resolver.seed(ctx_data.vars.gvars)
+    if keys:
+        await server.state.module_resolver.ensure_many(keys)
     return {"count": len(snapshot), "gvars": snapshot}
+
+
+@ls.command(GET_GVAR_CONTENT_COMMAND)
+async def get_gvar_content(server: AvraeLanguageServer, *args: Any):
+    payload = args[0] if args else {}
+    gvar_id = str(payload.get("id", "")) if isinstance(payload, dict) else ""
+    if not gvar_id:
+        return {"content": None}
+    await server.state.module_resolver.ensure(gvar_id)
+    content = server.state.module_resolver.get_local(gvar_id)
+    return {"content": content if isinstance(content, str) else None}
 
 
 @ls.command(REFRESH_CONFIG_COMMAND)
 def reload_config(server: AvraeLanguageServer, *args: Any):
     server.load_workspace(server.workspace_root)
     return {"status": "ok"}
+
+
+async def _prefetch_modules(server: AvraeLanguageServer, source: str) -> None:
+    """Warm the editor-only module resolver without delaying completion requests."""
+    ctx_data = server.state.context_builder.build()
+    resolver = server.state.module_resolver
+    resolver.seed(ctx_data.vars.gvars)
+    source_ctx = build_source_context(source, False)
+    keys: set[str] = set()
+    blocks = source_ctx.blocks or []
+    if blocks:
+        for block in blocks:
+            keys.update(literal_using_imports(block.code).values())
+    else:
+        keys.update(literal_using_imports(source_ctx.prepared).values())
+    if keys:
+        await resolver.ensure_many(keys)
 
 
 async def _publish_diagnostics(

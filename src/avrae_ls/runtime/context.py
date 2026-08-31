@@ -7,7 +7,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, Tuple, cast
 
 import httpx
 
@@ -18,13 +18,17 @@ log = logging.getLogger(__name__)
 _SKIP_GVAR = object()
 GVAR_VALUE_KEY = "value"
 GVAR_SCRIPT_WRITABLE_KEY = "scriptWritable"
+GVAR_SOURCE_PATH_KEY = "sourcePath"
 
 
-def make_gvar_record(value: Any, *, script_writable: bool = False) -> Dict[str, Any]:
-    return {
+def make_gvar_record(value: Any, *, script_writable: bool = False, source_path: Path | None = None) -> Dict[str, Any]:
+    record = {
         GVAR_VALUE_KEY: value,
         GVAR_SCRIPT_WRITABLE_KEY: bool(script_writable),
     }
+    if source_path is not None:
+        record[GVAR_SOURCE_PATH_KEY] = str(source_path.resolve())
+    return record
 
 
 def gvar_value(entry: Any) -> Any:
@@ -37,6 +41,15 @@ def gvar_script_writable(entry: Any) -> bool:
     if isinstance(entry, dict) and GVAR_VALUE_KEY in entry:
         return bool(entry.get(GVAR_SCRIPT_WRITABLE_KEY, False))
     return False
+
+
+def gvar_source_path(entry: Any) -> Path | None:
+    if not isinstance(entry, dict):
+        return None
+    raw_path = entry.get(GVAR_SOURCE_PATH_KEY)
+    if not isinstance(raw_path, str) or not raw_path:
+        return None
+    return Path(raw_path)
 
 
 def normalize_gvar_entry(
@@ -59,7 +72,7 @@ def normalize_gvar_entry(
             if not gvar_path.is_absolute() and relative_to is not None:
                 gvar_path = relative_to / gvar_path
             try:
-                return make_gvar_record(gvar_path.read_text(), script_writable=script_writable)
+                return make_gvar_record(gvar_path.read_text(), script_writable=script_writable, source_path=gvar_path)
             except FileNotFoundError:
                 log.warning("Gvar content file not found for '%s': %s", key, gvar_path)
                 return _SKIP_GVAR
@@ -67,9 +80,17 @@ def normalize_gvar_entry(
                 log.warning("Failed to read gvar content file for '%s' (%s): %s", key, gvar_path, exc)
                 return _SKIP_GVAR
         if GVAR_VALUE_KEY in value or GVAR_SCRIPT_WRITABLE_KEY in value:
-            return make_gvar_record(value.get(GVAR_VALUE_KEY), script_writable=script_writable)
+            return make_gvar_record(
+                value.get(GVAR_VALUE_KEY),
+                script_writable=script_writable,
+                source_path=gvar_source_path(value),
+            )
     if isinstance(value, dict) and GVAR_VALUE_KEY in value:
-        return make_gvar_record(value.get(GVAR_VALUE_KEY), script_writable=gvar_script_writable(value))
+        return make_gvar_record(
+            value.get(GVAR_VALUE_KEY),
+            script_writable=gvar_script_writable(value),
+            source_path=gvar_source_path(value),
+        )
     return make_gvar_record(value, script_writable=False)
 
 
@@ -84,7 +105,7 @@ def normalize_gvars(
         parsed = normalize_gvar_entry(key, value, relative_to=relative_to, source_label=source_label)
         if parsed is _SKIP_GVAR:
             continue
-        normalized[str(key)] = parsed
+        normalized[str(key)] = cast(Dict[str, Any], parsed)
     return normalized
 
 
@@ -382,7 +403,7 @@ class GVarResolver:
         )
         if normalized is _SKIP_GVAR:
             return None
-        return normalized
+        return cast(Dict[str, Any], normalized)
 
     def is_script_writable(self, key: str) -> bool:
         return gvar_script_writable(self._cache.get(str(key)))
