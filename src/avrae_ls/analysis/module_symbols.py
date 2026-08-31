@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 from urllib.parse import quote
 
 from lsprotocol import types
@@ -14,6 +15,7 @@ from avrae_ls.runtime.context import GVarResolver, gvar_source_path
 
 
 GVAR_URI_SCHEME = "avrae-gvar"
+MAX_MODULE_PREFETCH_DEPTH = 50
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,37 @@ def literal_using_imports(code: str) -> dict[str, str]:
             if keyword.arg and isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str):
                 imports[keyword.arg] = keyword.value.value
     return imports
+
+
+async def prefetch_module_dependency_ids(
+    gvar_ids: Iterable[str],
+    resolver: GVarResolver,
+    *,
+    max_depth: int = MAX_MODULE_PREFETCH_DEPTH,
+) -> None:
+    """Fetch a transitive graph of literal ``using()`` module IDs.
+
+    ``visited`` protects circular imports, while the depth limit mirrors
+    Draconic's module runtime. This intentionally excludes ``get_gvar()``,
+    because it is only needed for module navigation and completion.
+    """
+    frontier = set(gvar_ids)
+    visited: set[str] = set()
+    for _ in range(max_depth):
+        current = frontier - visited
+        if not current:
+            return
+        visited.update(current)
+        try:
+            await resolver.ensure_many(current)
+        except Exception:
+            return
+
+        frontier = set()
+        for gvar_id in current:
+            content = resolver.get_local(gvar_id)
+            if isinstance(content, str):
+                frontier.update(literal_using_imports(content).values())
 
 
 def module_exports_for_code(code: str, resolver: GVarResolver) -> dict[str, ModuleSymbol]:

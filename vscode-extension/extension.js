@@ -69,9 +69,11 @@ async function activate(context) {
     serverOptions,
     clientOptions
   );
+  const gvarContentChanged = new vscode.EventEmitter();
 
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider("avrae-gvar", {
+      onDidChange: gvarContentChanged.event,
       async provideTextDocumentContent(uri) {
         const gvarId = gvarIdFromUriPath(uri.path);
         try {
@@ -88,6 +90,7 @@ async function activate(context) {
       },
     })
   );
+  context.subscriptions.push(gvarContentChanged);
 
   context.subscriptions.push(client.start());
 
@@ -565,6 +568,15 @@ pre { white-space: pre-wrap; word-break: break-word; }
     return client.sendRequest("workspace/executeCommand", {
       command: "avrae.refreshGvars",
       arguments: [payload],
+    }).then((result) => {
+      // Virtual documents are snapshots. Notify VS Code after the server
+      // invalidates its module cache so already-open GVAR tabs reload too.
+      for (const document of vscode.workspace.textDocuments) {
+        if (document.uri.scheme === "avrae-gvar") {
+          gvarContentChanged.fire(document.uri);
+        }
+      }
+      return result;
     });
   }
 }

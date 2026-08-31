@@ -36,6 +36,7 @@ from avrae_ls.analysis.module_symbols import (
     location_for_module_symbol,
     member_at_position,
     module_exports_for_code,
+    prefetch_module_dependency_ids,
 )
 
 # Prefer package metadata so the server version matches the installed wheel.
@@ -389,7 +390,10 @@ async def refresh_gvars(server: AvraeLanguageServer, *args: Any):
     ctx_data = server.state.context_builder.build(profile)
     resolver = server.state.context_builder.gvar_resolver
     snapshot = await resolver.refresh(ctx_data.vars.gvars, keys)
-    server.state.module_resolver.seed(ctx_data.vars.gvars)
+    # The editor-facing resolver owns the virtual GVAR documents and module
+    # symbol cache. Rebuild it too, so Refresh GVARs cannot leave definitions
+    # and virtual documents pointing at stale remote content.
+    server.state.module_resolver.reset(ctx_data.vars.gvars)
     if keys:
         await server.state.module_resolver.ensure_many(keys)
     return {"count": len(snapshot), "gvars": snapshot}
@@ -426,7 +430,7 @@ async def _prefetch_modules(server: AvraeLanguageServer, source: str) -> None:
     else:
         keys.update(literal_using_imports(source_ctx.prepared).values())
     if keys:
-        await resolver.ensure_many(keys)
+        await prefetch_module_dependency_ids(keys, resolver)
 
 
 async def _publish_diagnostics(

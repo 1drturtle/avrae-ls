@@ -42,6 +42,40 @@ async def test_refresh_gvars_command_uses_profile_seed():
 
 
 @pytest.mark.asyncio
+async def test_refresh_gvars_command_refreshes_virtual_module_cache(monkeypatch):
+    server = AvraeLanguageServer()
+    server.load_workspace(Path("."))
+    server.state.config.enable_gvar_fetch = True
+    server.state.config.service.token = "token"
+    server.state.module_resolver.seed({"remote": "stale module"})
+
+    class DummyResponse:
+        status_code = 200
+
+        def json(self):
+            return {"value": "fresh module"}
+
+    class DummyClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            return DummyResponse()
+
+    monkeypatch.setattr("avrae_ls.runtime.context.httpx.AsyncClient", DummyClient)
+
+    await refresh_gvars(server, {"keys": ["remote"]})
+
+    assert server.state.module_resolver.get_local("remote") == "fresh module"
+
+
+@pytest.mark.asyncio
 async def test_silent_gvar_fetch_seeds_none_when_disabled():
     cfg = AvraeLSConfig.default(Path("."))
     cfg.silent_gvar_fetch = True
