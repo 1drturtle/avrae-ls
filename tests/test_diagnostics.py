@@ -243,3 +243,15 @@ async def test_inline_expression_diagnostics_offset_respects_inline_char(tmp_pat
     diag = diags[0]
     assert diag.range.start.line == 0
     assert diag.range.start.character > alias_text.index("{{")
+
+
+@pytest.mark.asyncio
+async def test_template_bindings_are_shared(tmp_path):
+    from avrae_ls.config import AvraeLSConfig
+    from avrae_ls.runtime.context import ContextBuilder
+
+    config = AvraeLSConfig.default(tmp_path)
+    builder = ContextBuilder(config)
+    provider = DiagnosticProvider(MockExecutor(), config.diagnostics)
+    diagnostics = await provider.analyze("echo <drac2>x=7</drac2>{{x}}", builder.build(), builder.gvar_resolver)
+    assert not diagnostics

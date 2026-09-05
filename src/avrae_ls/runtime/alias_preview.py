@@ -4,7 +4,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional, Tuple
 
-from avrae_ls.analysis.parser import DRACONIC_RE, INLINE_DRACONIC_RE, INLINE_ROLL_RE
+from avrae_ls.analysis.parser import DRACONIC_RE, INLINE_DRACONIC_RE, INLINE_ROLL_RE, VALUE_RE
 from avrae_ls.runtime import argparser as avrae_argparser
 from avrae_ls.runtime.runtime import ExecutionResult, InstructionBudget, MockExecutor, _roll_dice
 from avrae_ls.runtime.context import ContextData, GVarResolver
@@ -142,6 +142,7 @@ async def render_alias_command(
     error_line: int | None = None
     error_col: int | None = None
 
+    session = executor.create_session(ctx_data, resolver, instruction_budget)
     pos = 0
     matches: list[tuple[str, re.Match[str]]] = []
     for match in DRACONIC_RE.finditer(body):
@@ -150,6 +151,9 @@ async def render_alias_command(
         matches.append(("inline", match))
     for match in INLINE_ROLL_RE.finditer(body):
         matches.append(("roll", match))
+
+    for match in VALUE_RE.finditer(body):
+        matches.append(("lookup", match))
 
     matches.sort(key=lambda item: item[1].start())
 
@@ -160,7 +164,7 @@ async def render_alias_command(
 
         if kind in {"block", "inline"}:
             code = match.group(1)
-            result: ExecutionResult = await executor.run(code, ctx_data, resolver, instruction_budget)
+            result: ExecutionResult = await executor.run(code, ctx_data, resolver, instruction_budget, session=session)
             if result.stdout:
                 stdout_parts.append(result.stdout)
             if result.error:
@@ -170,8 +174,17 @@ async def render_alias_command(
             last_value = result.value
             if result.value is not None:
                 parts.append(str(result.value))
+        elif kind == "lookup":
+            token = match.group(1)
+            if re.fullmatch(r"<a?([@#]|:.+:)[&!]{0,2}\d+>", match.group(0)):
+                parts.append(match.group(0))
+            else:
+                parts.append(str(session.interpreter.names.get(token, token)))
         else:
-            roll_expr = match.group(1)
+            roll_expr = " ".join(
+                str(session.interpreter.names.get(part.strip(), part.strip()))
+                for part in re.split(r"([-+*/().<>=])", match.group(1))
+            )
             roll_total = _roll_dice(roll_expr)
             last_value = roll_total
             parts.append(str(roll_total))

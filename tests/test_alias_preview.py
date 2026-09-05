@@ -229,3 +229,54 @@ def test_simulate_command_strips_alias_header():
     assert simulated.command_name == "embed"
     assert simulated.preview is not None
     assert "Done?" in simulated.preview
+
+
+@pytest.mark.asyncio
+async def test_template_shares_locals_functions_and_imports(tmp_path):
+    resolver = _resolver(tmp_path)
+    resolver.reset({"mod": "items = []"})
+    source = """echo <drac2>
+x = 7
+def get_x():
+    return x
+using(m="mod")
+m.items.append(1)
+</drac2>{{get_x()}}<drac2>
+using(n="mod")
+return n.items
+</drac2> <x> {x+1}"""
+    result = await render_alias_command(source, MockExecutor(), _ctx(), resolver)
+    assert result.error is None
+    assert result.command == "echo 7[1] 7 8"
+
+
+@pytest.mark.asyncio
+async def test_template_escapes_mentions_and_unknown_lookups(tmp_path):
+    source = r"echo \{{1+1}} \{2} \<name> <@123> <:wave:123> <missing>"
+    result = await render_alias_command(source, MockExecutor(), _ctx(), _resolver(tmp_path))
+    assert result.error is None
+    assert result.command == r"echo \{{1+1}} \{2} \<name> <@123> <:wave:123> missing"
+
+
+@pytest.mark.asyncio
+async def test_template_session_does_not_leak_between_runs(tmp_path):
+    executor, ctx, resolver = MockExecutor(), _ctx(), _resolver(tmp_path)
+    await render_alias_command("<drac2>x=1</drac2>", executor, ctx, resolver)
+    result = await render_alias_command("{{x}}", executor, ctx, resolver)
+    assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_template_budget_is_cumulative_and_stdout_not_repeated(tmp_path):
+    from avrae_ls.runtime.runtime import InstructionBudget
+
+    budget = InstructionBudget(hard_limit=5)
+    result = await render_alias_command(
+        "{{1}} {{2}} {{3}}", MockExecutor(), _ctx(), _resolver(tmp_path), instruction_budget=budget
+    )
+    assert result.error is not None
+    assert budget.instruction_count == 6
+    result = await render_alias_command(
+        '<drac2>print("one")</drac2><drac2>print("two")</drac2>', MockExecutor(), _ctx(), _resolver(tmp_path)
+    )
+    assert result.stdout == "one\ntwo\n"

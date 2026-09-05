@@ -15,9 +15,10 @@ class DraconicBlock:
     inline: bool = False
 
 
-DRACONIC_RE = re.compile(r"<drac2>([\s\S]*?)</drac2>", re.IGNORECASE)
-INLINE_DRACONIC_RE = re.compile(r"\{\{([\s\S]*?)\}\}", re.DOTALL)
-INLINE_ROLL_RE = re.compile(r"(?<!\{)\{(?!\{)([\s\S]*?)(?<!\})\}(?!\})", re.DOTALL)
+DRACONIC_RE = re.compile(r"(?<!\\)<drac2>([\s\S]*?)</drac2>", re.IGNORECASE)
+INLINE_DRACONIC_RE = re.compile(r"(?<!\\)\{\{([\s\S]*?)\}\}", re.DOTALL)
+INLINE_ROLL_RE = re.compile(r"(?<!\\)(?<!\{)\{(?!\{)([\s\S]*?)(?<!\})\}(?!\})", re.DOTALL)
+VALUE_RE = re.compile(r"(?<!\\)<([^\s<>]+?)>")
 ALIAS_MODULE_SUFFIX = ".alias-module"
 
 

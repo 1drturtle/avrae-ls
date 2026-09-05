@@ -94,6 +94,15 @@ class ExecutionResult:
 
 
 @dataclass
+class ExecutionSession:
+    """Interpreter and host bindings shared by every segment of one alias."""
+
+    interpreter: draconic.DraconicInterpreter
+    buffer: io.StringIO
+    module_sources: dict[str, str]
+
+
+@dataclass
 class InstructionBudget:
     """Cumulative instruction limits for one alias or gvar test case."""
 
@@ -175,7 +184,15 @@ _YAML_DUMPER = _yaml_dumper()
 
 
 def _dump_yaml(obj: Any, indent: int = 2) -> str:
-    return yaml.dump(obj, Dumper=_YAML_DUMPER, default_flow_style=False, indent=indent, sort_keys=False)
+    stream = io.StringIO()
+    dumper = _YAML_DUMPER(stream, default_flow_style=False, indent=indent, sort_keys=False)
+    try:
+        dumper.open()
+        dumper.represent(obj)
+        dumper.close()
+    finally:
+        dumper.dispose()
+    return stream.getvalue()
 
 
 def _json_default(obj: Any) -> Any:
@@ -371,14 +388,12 @@ class MockExecutor:
         variable_names = set(ctx_data.vars.to_initial_names().keys())
         return builtin_names | runtime_names | variable_names
 
-    async def run(
+    def create_session(
         self,
-        code: str,
         ctx_data: ContextData,
         gvar_resolver: GVarResolver | None = None,
         instruction_budget: InstructionBudget | None = None,
-    ) -> ExecutionResult:
-        run_started = time.perf_counter()
+    ) -> ExecutionSession:
         buffer = io.StringIO()
         resolver = gvar_resolver
         interpreter_ref: dict[str, draconic.DraconicInterpreter | None] = {"interpreter": None}
@@ -419,6 +434,25 @@ class MockExecutor:
         )
         interpreter_ref["interpreter"] = interpreter
 
+        interpreter._preflight()
+        return ExecutionSession(interpreter, buffer, module_sources)
+
+    async def run(
+        self,
+        code: str,
+        ctx_data: ContextData,
+        gvar_resolver: GVarResolver | None = None,
+        instruction_budget: InstructionBudget | None = None,
+        *,
+        session: ExecutionSession | None = None,
+    ) -> ExecutionResult:
+        run_started = time.perf_counter()
+        session = session or self.create_session(ctx_data, gvar_resolver, instruction_budget)
+        interpreter, buffer = session.interpreter, session.buffer
+        module_sources = session.module_sources
+        resolver = gvar_resolver
+        output_start = buffer.tell()
+        statements_before, loops_before = interpreter._num_stmts, interpreter._loops
         value = None
         error: BaseException | None = None
         parse_started = time.perf_counter()
@@ -426,7 +460,7 @@ class MockExecutor:
         parse_elapsed_ms = (time.perf_counter() - parse_started) * 1000
         if parse_error is not None:
             log.debug("Mock execution error: %s", parse_error, exc_info=parse_error)
-            return ExecutionResult(stdout=buffer.getvalue(), value=value, error=parse_error)
+            return ExecutionResult(stdout=buffer.getvalue()[output_start:], value=value, error=parse_error)
 
         if resolver:
             await _ensure_literal_gvars(code_to_run, resolver)
@@ -434,15 +468,15 @@ class MockExecutor:
 
         exec_started = time.perf_counter()
         try:
-            interpreter._preflight()
+            interpreter._expr = code_to_run
             value = self._exec_with_value(interpreter, parsed)
         except BaseException as exc:  # draconic raises BaseException subclasses
             error = exc
             attach_runtime_error_context(error, module_sources=module_sources)
             log.debug("Mock execution error: %s", exc, exc_info=exc)
         exec_elapsed_ms = (time.perf_counter() - exec_started) * 1000
-        instruction_count = interpreter._num_stmts
-        loop_count = interpreter._loops
+        instruction_count = interpreter._num_stmts - statements_before
+        loop_count = interpreter._loops - loops_before
         if instruction_budget is not None:
             instruction_budget.record(instruction_count, loop_count)
         log.debug(
@@ -453,7 +487,7 @@ class MockExecutor:
             cache_hit,
         )
         return ExecutionResult(
-            stdout=buffer.getvalue(),
+            stdout=buffer.getvalue()[output_start:],
             value=value,
             error=error,
             instruction_count=instruction_count,

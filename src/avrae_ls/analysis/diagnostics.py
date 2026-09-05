@@ -55,8 +55,9 @@ class DiagnosticProvider:
             diagnostics.extend(await self._analyze_code(source_ctx.prepared, ctx_data, gvar_resolver))
             return diagnostics
 
+        bindings: set[str] = set()
         for block in blocks:
-            block_diags = await self._analyze_code(block.code, ctx_data, gvar_resolver)
+            block_diags = await self._analyze_code(block.code, ctx_data, gvar_resolver, bindings)
             diagnostics.extend(_shift_diagnostics(block_diags, block.line_offset, block.char_offset))
         return diagnostics
 
@@ -65,6 +66,7 @@ class DiagnosticProvider:
         code: str,
         ctx_data: ContextData,
         gvar_resolver: GVarResolver,
+        bindings: set[str] | None = None,
     ) -> List[types.Diagnostic]:
         diagnostics: list[types.Diagnostic] = []
         parser = draconic.DraconicInterpreter()
@@ -83,7 +85,7 @@ class DiagnosticProvider:
             diagnostics.append(_syntax_from_std(exc))
             return diagnostics
 
-        diagnostics.extend(self._check_unknown_names(body, ctx_data, self._settings.semantic_level))
+        diagnostics.extend(self._check_unknown_names(body, ctx_data, self._settings.semantic_level, bindings))
         diagnostics.extend(await _check_gvars(body, gvar_resolver, self._settings))
         diagnostics.extend(_check_imports(body, self._settings.semantic_level))
         diagnostics.extend(_check_call_args(body, self._builtin_signatures, self._settings.semantic_level))
@@ -98,8 +100,10 @@ class DiagnosticProvider:
         body: Sequence[ast.AST],
         ctx_data: ContextData,
         severity_level: str,
+        bindings: set[str] | None = None,
     ) -> List[types.Diagnostic]:
         known: Set[str] = set(self._executor.available_names(ctx_data))
+        known.update(bindings or ())
         diagnostics: list[types.Diagnostic] = []
         # A top-level function's body is evaluated only when it is called, by
         # which time the module has finished defining its top-level functions.
@@ -273,6 +277,8 @@ class DiagnosticProvider:
         walker = Walker(known)
         for stmt in body:
             walker.visit(stmt)
+        if bindings is not None:
+            bindings.update(walker._scopes[0])
         return diagnostics
 
 

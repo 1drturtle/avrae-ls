@@ -736,6 +736,11 @@ async def test_using_fallback_fetches_missing_module(monkeypatch, tmp_path):
             return True
         return False
 
+    async def skip_prefetch(keys):
+        return {key: resolver.get_local(key) is not None for key in keys}
+
+    # Exercise the blocking fallback without attempting real network prefetches.
+    monkeypatch.setattr(resolver, "ensure_many", skip_prefetch)
     monkeypatch.setattr(resolver, "ensure_blocking", fake_ensure_blocking)
 
     result = await executor.run('using(outer="outer")\nreturn outer.value', ctx, resolver)
@@ -762,6 +767,11 @@ async def test_get_gvar_fallback_fetches_dynamic_address(monkeypatch, tmp_path):
             return True
         return False
 
+    async def skip_prefetch(keys):
+        return {key: resolver.get_local(key) is not None for key in keys}
+
+    # Exercise the blocking fallback without attempting real network prefetches.
+    monkeypatch.setattr(resolver, "ensure_many", skip_prefetch)
     monkeypatch.setattr(resolver, "ensure_blocking", fake_ensure_blocking)
 
     result = await executor.run('using(outer="outer")\nreturn outer.value.answer', ctx, resolver)
