@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import keyword
 import logging
 import asyncio
 from dataclasses import dataclass, field
@@ -24,17 +25,15 @@ from avrae_ls.analysis.source_context import build_source_context, code_for_posi
 from avrae_ls.lsp.signature_help import load_signatures, signature_help_for_code
 from avrae_ls.lsp.completions import gather_suggestions, completion_items_for_position, hover_for_position
 from avrae_ls.lsp.code_actions import code_actions_for_document
+from avrae_ls.analysis.bindings import build_binding_index
+from avrae_ls.analysis.workspace_symbols import workspace_sources, module_references, same_location, navigation_resolver
 from avrae_ls.analysis.symbols import (
     build_symbol_table,
     document_symbols,
-    find_definition_range,
-    find_references,
     range_for_word,
 )
 from avrae_ls.analysis.module_symbols import (
     literal_using_imports,
-    location_for_module_symbol,
-    member_at_position,
     module_exports_for_code,
     prefetch_module_dependency_ids,
 )
@@ -162,75 +161,116 @@ def on_document_symbol(server: AvraeLanguageServer, params: types.DocumentSymbol
 @ls.feature(types.TEXT_DOCUMENT_DEFINITION)
 def on_definition(server: AvraeLanguageServer, params: types.DefinitionParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
+    resolver = navigation_resolver(server.state.module_resolver, server.state.config, server.workspace.text_documents)
     is_module = _is_alias_module_document(doc)
-    source_ctx = build_source_context(doc.source, is_module)
-    selected = code_for_position(source_ctx, params.position.line, params.position.character)
-    if selected is not None:
-        code, rel_line, rel_char = selected
-        member = member_at_position(code, rel_line, rel_char)
-        if member:
-            symbol = module_exports_for_code(code, server.state.module_resolver).get(member)
-            if symbol:
-                return location_for_module_symbol(symbol)
-    table = build_symbol_table(doc.source, treat_as_module=is_module)
-    word = doc.word_at_position(params.position)
-    rng = find_definition_range(table, word)
-    if rng is None:
+    for rng, target in module_references(doc.source, is_module, resolver):
+        if (
+            rng.start.line == params.position.line
+            and rng.start.character <= params.position.character <= rng.end.character
+        ):
+            return target
+    index = build_binding_index(doc.source, treat_as_module=is_module)
+    binding = index.at(params.position)
+    if binding is None or not binding.declarations:
         return None
-    return types.Location(uri=params.text_document.uri, range=rng)
+    return types.Location(uri=params.text_document.uri, range=binding.declarations[0])
+
+
+def _symbol_locations(server, params, *, include_declaration=True, new_name=None):
+    doc = server.workspace.get_text_document(params.text_document.uri)
+    resolver = navigation_resolver(server.state.module_resolver, server.state.config, server.workspace.text_documents)
+    is_module = _is_alias_module_document(doc)
+    index = build_binding_index(doc.source, treat_as_module=is_module)
+    binding = index.at(params.position)
+    target = None
+    if binding is not None:
+        if new_name and not index.can_rename(binding, new_name):
+            return []
+        if not binding.declarations:
+            return []
+        target = types.Location(uri=doc.uri, range=binding.declarations[0])
+        locations = [
+            types.Location(uri=doc.uri, range=r)
+            for r in [*(binding.declarations if include_declaration else []), *binding.reads]
+        ]
+        if binding.scope is not index.root or not is_module:
+            return locations
+    else:
+        locations = []
+        for rng, location in module_references(doc.source, is_module, resolver):
+            p = params.position
+            if rng.start.line == p.line and rng.start.character <= p.character <= rng.end.character:
+                target = location
+                break
+    if target is None:
+        return []
+    # Remote gvars are navigable but cannot be safely renamed in Avrae.
+    if new_name and not target.uri.startswith("file:"):
+        return []
+    sources = workspace_sources(server.workspace_root, server.workspace.text_documents)
+    if target.uri.startswith("file:") and target.uri not in sources:
+        path = uris.to_fs_path(target.uri)
+        if path:
+            try:
+                sources[target.uri] = (Path(path).read_text(), True)
+            except (OSError, UnicodeError):
+                return []
+    for uri, (source, module) in sources.items():
+        if uri == target.uri:
+            target_index = build_binding_index(source, treat_as_module=module)
+            target_binding = target_index.at(target.range.start)
+            if target_binding is None or (new_name and not target_index.can_rename(target_binding, new_name)):
+                return []
+            locations.extend(
+                types.Location(uri=uri, range=r)
+                for r in [*(target_binding.declarations if include_declaration else []), *target_binding.reads]
+            )
+        for rng, definition in module_references(source, module, resolver):
+            if same_location(definition, target):
+                locations.append(types.Location(uri=uri, range=rng))
+    unique = {}
+    for location in locations:
+        r = location.range
+        unique[(location.uri, r.start.line, r.start.character, r.end.line, r.end.character)] = location
+    return list(unique.values())
 
 
 @ls.feature(types.TEXT_DOCUMENT_REFERENCES)
 def on_references(server: AvraeLanguageServer, params: types.ReferenceParams):
-    doc = server.workspace.get_text_document(params.text_document.uri)
-    is_module = _is_alias_module_document(doc)
-    table = build_symbol_table(doc.source, treat_as_module=is_module)
-    word = doc.word_at_position(params.position)
-    if not word or not table.lookup(word):
-        return []
-
-    ranges = find_references(
-        table,
-        doc.source,
-        word,
-        include_declaration=params.context.include_declaration,
-        treat_as_module=is_module,
-    )
-    return [types.Location(uri=params.text_document.uri, range=rng) for rng in ranges]
+    return _symbol_locations(server, params, include_declaration=params.context.include_declaration)
 
 
 @ls.feature(types.TEXT_DOCUMENT_PREPARE_RENAME)
 def on_prepare_rename(server: AvraeLanguageServer, params: types.PrepareRenameParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
-    table = build_symbol_table(doc.source, treat_as_module=_is_alias_module_document(doc))
-    word = doc.word_at_position(params.position)
-    if not word or not table.lookup(word):
+    if not _symbol_locations(server, params):
         return None
     return range_for_word(doc.source, params.position)
 
 
 @ls.feature(types.TEXT_DOCUMENT_RENAME)
 def on_rename(server: AvraeLanguageServer, params: types.RenameParams):
-    doc = server.workspace.get_text_document(params.text_document.uri)
-    is_module = _is_alias_module_document(doc)
-    table = build_symbol_table(doc.source, treat_as_module=is_module)
-    word = doc.word_at_position(params.position)
-    if not word or not table.lookup(word) or not params.new_name:
+    if (
+        not params.new_name.isidentifier()
+        or keyword.iskeyword(params.new_name)
+        or params.new_name in server.state.executor.available_names(server.state.context_builder.build())
+    ):
         return None
-
-    ranges = find_references(table, doc.source, word, include_declaration=True, treat_as_module=is_module)
-    if not ranges:
+    locations = _symbol_locations(server, params, new_name=params.new_name)
+    if not locations:
         return None
-    edits = [types.TextEdit(range=rng, new_text=params.new_name) for rng in ranges]
-    return types.WorkspaceEdit(changes={params.text_document.uri: edits})
+    changes: dict[str, list[types.TextEdit]] = {}
+    for location in locations:
+        changes.setdefault(location.uri, []).append(types.TextEdit(range=location.range, new_text=params.new_name))
+    return types.WorkspaceEdit(changes=changes)
 
 
 @ls.feature(types.WORKSPACE_SYMBOL)
 def on_workspace_symbol(server: AvraeLanguageServer, params: types.WorkspaceSymbolParams):
     symbols: list[types.SymbolInformation] = []
     query = (params.query or "").lower()
-    for uri, doc in server.workspace.text_documents.items():
-        table = build_symbol_table(doc.source, treat_as_module=_is_alias_module_document(doc))
+    for uri, (source, is_module) in workspace_sources(server.workspace_root, server.workspace.text_documents).items():
+        table = build_symbol_table(source, treat_as_module=is_module)
         for entry in table.entries:
             if query and query not in entry.name.lower():
                 continue

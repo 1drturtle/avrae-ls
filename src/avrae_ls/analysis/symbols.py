@@ -8,6 +8,7 @@ from typing import Dict, Iterable, List, Optional
 import draconic
 from lsprotocol import types
 
+from avrae_ls.analysis.bindings import BindingIndex, build_binding_index
 from avrae_ls.analysis.source_context import build_source_context
 from avrae_ls.analysis.parser import wrap_draconic
 from avrae_ls.lsp.lsp_utils import range_from_positions, shift_range
@@ -24,7 +25,8 @@ class SymbolEntry:
 
 
 class SymbolTable:
-    def __init__(self, entries: List[SymbolEntry]):
+    def __init__(self, entries: List[SymbolEntry], bindings: BindingIndex | None = None):
+        self.bindings = bindings
         self._entries = entries
         self._index: Dict[str, SymbolEntry] = {entry.name: entry for entry in entries}
 
@@ -44,7 +46,7 @@ def build_symbol_table(source: str, *, treat_as_module: bool = False) -> SymbolT
     else:
         for block in source_ctx.blocks:
             entries.extend(_symbols_from_code(block.code, block.line_offset, block.char_offset))
-    return SymbolTable(entries)
+    return SymbolTable(entries, build_binding_index(source, treat_as_module=treat_as_module))
 
 
 def document_symbols(source: str, *, treat_as_module: bool = False) -> List[types.DocumentSymbol]:
@@ -75,20 +77,11 @@ def find_references(
     *,
     treat_as_module: bool = False,
 ) -> List[types.Range]:
-    ranges: list[types.Range] = []
-    entry = table.lookup(name)
-    include_stores = include_declaration and entry is None
-    if include_declaration:
-        if entry:
-            ranges.append(entry.selection_range)
-
-    source_ctx = build_source_context(source, treat_as_module)
-    if not source_ctx.blocks:
-        ranges.extend(_references_from_code(source_ctx.prepared, name, 0, 0, include_stores))
-    else:
-        for block in source_ctx.blocks:
-            ranges.extend(_references_from_code(block.code, name, block.line_offset, block.char_offset, include_stores))
-    return _dedupe_ranges(ranges)
+    index = table.bindings or build_binding_index(source, treat_as_module=treat_as_module)
+    binding = index.root.bindings.get(name)
+    if binding is None:
+        return []
+    return _dedupe_ranges([*(binding.declarations if include_declaration else []), *binding.reads])
 
 
 def range_for_word(source: str, position: types.Position) -> types.Range | None:
@@ -168,48 +161,13 @@ def _entry_from_node(node: ast.AST, line_offset: int = 0, char_offset: int = 0) 
         ensure_nonempty=True,
     )
     rng = shift_range(rng, line_offset, char_offset)
-    return SymbolEntry(name=name, kind=kind, range=rng, selection_range=rng)
-
-
-class _ReferenceCollector(ast.NodeVisitor):
-    def __init__(self, target: str, include_stores: bool):
-        super().__init__()
-        self._target = target
-        self._include_stores = include_stores
-        self.ranges: list[types.Range] = []
-
-    def visit_Name(self, node: ast.Name):  # type: ignore[override]
-        if node.id == self._target:
-            if isinstance(node.ctx, ast.Store) and not self._include_stores:
-                return
-            rng = range_from_positions(
-                getattr(node, "lineno", 1),
-                getattr(node, "col_offset", 0),
-                getattr(node, "end_lineno", None),
-                getattr(node, "end_col_offset", None),
-                ensure_nonempty=True,
-            )
-            self.ranges.append(rng)
-        self.generic_visit(node)
-
-
-def _references_from_code(
-    code: str,
-    name: str,
-    line_offset: int,
-    char_offset: int,
-    include_stores: bool,
-) -> List[types.Range]:
-    body, offset_adjust = _parse_draconic(code)
-    if not body:
-        return []
-
-    collector = _ReferenceCollector(name, include_stores)
-    for node in body:
-        collector.visit(node)
-
-    local_offset = line_offset + offset_adjust
-    return [shift_range(rng, local_offset, char_offset) for rng in collector.ranges]
+    selection = rng
+    if isinstance(node, ast.FunctionDef):
+        selection = types.Range(
+            start=types.Position(line=rng.start.line, character=rng.start.character + 4),
+            end=types.Position(line=rng.start.line, character=rng.start.character + 4 + len(name)),
+        )
+    return SymbolEntry(name=name, kind=kind, range=rng, selection_range=selection)
 
 
 def _parse_draconic(code: str) -> tuple[list[ast.stmt], int]:
