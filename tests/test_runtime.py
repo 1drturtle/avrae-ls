@@ -986,3 +986,15 @@ async def test_loop_budget_stops_at_hard_limit(tmp_path):
     assert budget.loop_hard_limit_reached
     assert AVRAE_LOOP_LIMIT == 10_000
     assert TEST_HARD_LOOP_LIMIT == 20_000
+
+
+@pytest.mark.asyncio
+async def test_counter_reset_result_available_in_draconic(tmp_path):
+    ctx = ContextData(character={"name": "Hero"}, vars=VarSources())
+    result = await MockExecutor().run(
+        'character().create_cc("Uses", maxVal="5", initial_value="2")\nr=character().cc("Uses").reset()\nreturn [r.new_value, r.old_value, r.delta]',
+        ctx,
+        _resolver(tmp_path),
+    )
+    assert result.error is None
+    assert result.value == [5, 2, "+3"]

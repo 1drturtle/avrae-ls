@@ -1,14 +1,45 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Iterable, Iterator, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, ClassVar, Iterable, Iterator, Mapping, MutableMapping, Optional, Sequence, NamedTuple
 
 import d20
+import draconic
+
+from avrae_ls.runtime.cvars import derive_character_cvars
+from avrae_ls.runtime.damage import roll_damage
 
 from avrae_ls.runtime.dice import RerollableStringifier
 
 UNSET = object()
+
+
+class NoReset(ValueError):
+    """The counter has no configured reset."""
+
+
+class CounterOutOfBounds(ValueError):
+    """A strict counter update exceeds its limits."""
+
+
+class ConsumableException(ValueError):
+    """The requested counter does not exist."""
+
+
+class CustomCounterResetResult(NamedTuple):
+    new_value: int
+    old_value: int
+    target_value: int
+    delta: str
+
+
+def _counter_math(value: Any, names: Mapping[str, Any]) -> int:
+    result = draconic.SimpleInterpreter(builtins=dict(names)).eval(str(value))
+    if not isinstance(result, (int, float, str)):
+        raise ValueError("Counter expressions must evaluate to a number.")
+    return int(result)
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -660,12 +691,13 @@ class AliasResistances(_DirMixin):
 
     @staticmethod
     def _matches(entries: Iterable[ResistanceEntry], token: str) -> bool:
+        words = set(re.findall(r"[a-z]+", token.lower()))
         for entry in entries:
-            if entry.only and token not in entry.only:
+            if not {v.lower() for v in entry.only}.issubset(words):
                 continue
-            if entry.unless and token in entry.unless:
+            if {v.lower() for v in entry.unless} & words:
                 continue
-            if entry.dtype.lower() == token:
+            if entry.dtype.lower() in words:
                 return True
         return False
 
@@ -780,33 +812,54 @@ class AliasSpellbook(_DirMixin):
 
     def get_max_slots(self, level: int) -> int:
         slots = self._data.get("max_slots") or {}
-        return _safe_int(slots.get(int(level)), 0)
+        return _safe_int(slots.get(int(level), slots.get(str(int(level)))), 0)
 
     def get_slots(self, level: int) -> int:
         slots = self._data.get("slots") or {}
         if int(level) == 0:
             return 1
-        return _safe_int(slots.get(int(level)), 0)
+        return _safe_int(slots.get(int(level), slots.get(str(int(level)))), 0)
 
-    def set_slots(self, level: int, value: int, pact: bool = True) -> int:
+    def set_slots(self, level: int, value: int, pact: bool = True) -> None:
+        level, value = int(level), int(value)
+        if not 1 <= level <= 9:
+            raise ValueError("Spell slot level must be between 1 and 9.")
+        maximum = self.get_max_slots(level)
+        if not 0 <= value <= maximum:
+            raise CounterOutOfBounds(f"Spell slots must be between 0 and {maximum}.")
+        if level == self.pact_slot_level:
+            current = self.get_slots(level)
+            pact_slots = self.num_pact_slots or 0
+            pact_max = self.max_pact_slots or 0
+            delta = value - current
+            if pact:
+                pact_slots = max(0, min(pact_max, pact_slots + delta))
+            else:
+                normal = current - pact_slots
+                normal_max = maximum - pact_max
+                normal_delta = max(0, min(normal_max, normal + delta)) - normal
+                pact_slots += delta - normal_delta
+            self._data["num_pact_slots"] = pact_slots
         slots = self._data.setdefault("slots", {})
-        slots[int(level)] = int(value)
-        return slots[int(level)]
+        slots.pop(str(level), None)
+        slots[level] = value
 
-    def use_slot(self, level: int) -> int:
-        current = self.get_slots(level)
-        return self.set_slots(level, max(0, current - 1))
+    def use_slot(self, level: int) -> None:
+        if int(level) == 0:
+            return
+        self.set_slots(level, self.get_slots(level) - 1)
 
     def reset_slots(self) -> None:
-        slots = self._data.get("slots") or {}
-        max_slots = self._data.get("max_slots") or {}
-        for level, maximum in max_slots.items():
-            slots[int(level)] = _safe_int(maximum)
-        self._data["slots"] = slots
+        self._data["slots"] = {int(level): int(value) for level, value in (self._data.get("max_slots") or {}).items()}
+        if self.max_pact_slots is not None:
+            self._data["num_pact_slots"] = self.max_pact_slots
 
     def reset_pact_slots(self) -> None:
         if self.max_pact_slots is None:
             return
+        level = self.pact_slot_level
+        if level is not None:
+            self.set_slots(level, self.get_slots(level) + self.max_pact_slots - (self.num_pact_slots or 0))
         self._data["num_pact_slots"] = self.max_pact_slots
 
     def remaining_casts_of(self, spell: str, level: int) -> str:
@@ -961,6 +1014,7 @@ class AliasAction(_ItemAccessMixin, _EmptyCollectionMixin, _DirMixin):
 @dataclass
 class AliasCustomCounter(_ItemAccessMixin, _EmptyCollectionMixin, _DirMixin):
     _data: MutableMapping[str, Any] = field(default_factory=dict)
+    _names: Mapping[str, Any] = field(default_factory=dict)
     ATTRS: ClassVar[list[str]] = [
         "name",
         "title",
@@ -997,11 +1051,11 @@ class AliasCustomCounter(_ItemAccessMixin, _EmptyCollectionMixin, _DirMixin):
 
     @property
     def max(self) -> int:
-        return _safe_int(self._data.get("max"), 2**31 - 1)
+        return _counter_math(self._data["max"], self._names) if self._data.get("max") is not None else 2**31 - 1
 
     @property
     def min(self) -> int:
-        return _safe_int(self._data.get("min"), -(2**31))
+        return _counter_math(self._data["min"], self._names) if self._data.get("min") is not None else -(2**31)
 
     @property
     def reset_on(self) -> str | None:
@@ -1016,7 +1070,7 @@ class AliasCustomCounter(_ItemAccessMixin, _EmptyCollectionMixin, _DirMixin):
     @property
     def reset_to(self) -> int | None:
         raw = self._data.get("reset_to")
-        return int(raw) if raw is not None else None
+        return _counter_math(raw, self._names) if raw is not None else None
 
     @property
     def reset_by(self) -> str | None:
@@ -1030,21 +1084,29 @@ class AliasCustomCounter(_ItemAccessMixin, _EmptyCollectionMixin, _DirMixin):
         val = int(new_value)
         if strict:
             if val > self.max or val < self.min:
-                raise ValueError("Counter out of bounds")
+                raise CounterOutOfBounds("Counter out of bounds")
         val = max(self.min, min(val, self.max))
         self._data["value"] = val
         return val
 
-    def reset(self) -> dict[str, Any]:
+    def reset(self) -> CustomCounterResetResult:
+        if self.reset_on == "none":
+            raise NoReset("This counter has no reset.")
+        old_value = self.value
         if self.reset_to is not None:
             target = self.reset_to
         elif self.reset_by is not None:
-            target = self.value + _safe_int(self.reset_by, 0)
-        else:
+            expression = re.sub(r"\{([^}]+)\}", lambda m: str(_counter_math(m.group(1), self._names)), self.reset_by)
+            roll = d20.roll(expression)
+            target = old_value + int(roll.total)
+            new_value = self.set(target)
+            return CustomCounterResetResult(new_value, old_value, target, f"+{roll.result}")
+        elif self._data.get("max") is not None:
             target = self.max
-        old_value = self.value
+        else:
+            raise NoReset("This counter has no reset value.")
         new_value = self.set(target)
-        return {"new_value": new_value, "old_value": old_value, "target_value": target, "delta": new_value - old_value}
+        return CustomCounterResetResult(new_value, old_value, target, f"{new_value - old_value:+}")
 
     def full_str(self, include_name: bool = False) -> str:
         prefix = f"**{self.name}**\n" if include_name else ""
@@ -1181,35 +1243,34 @@ class AliasStatBlock(_ItemAccessMixin, _EmptyCollectionMixin, _DirMixin):
         val = self._data.get("creature_type")
         return str(val) if val is not None else None
 
-    def set_hp(self, new_hp: int) -> int:
-        """Set current hit points."""
-        self._data["hp"] = int(new_hp)
-        return self._data["hp"]
+    def set_hp(self, new_hp: int) -> None:
+        self._data["hp"] = max(0, int(new_hp))
 
-    def modify_hp(self, amount: int, ignore_temp: bool = False, overflow: bool = True) -> int:
-        """Adjust hit points by `amount`, respecting overflow limits when requested."""
-        hp = self.hp or 0
-        new_hp = hp + int(amount)
+    def modify_hp(self, amount: int, ignore_temp: bool = False, overflow: bool = True) -> str:
+        amount = int(amount)
+        if amount < 0 and not ignore_temp:
+            absorbed = min(self.temp_hp, -amount)
+            self.set_temp_hp(self.temp_hp - absorbed)
+            amount += absorbed
+        hp = self.hp
+        if hp is None:
+            return f"Dealt {-amount} damage!"
+        new_hp = hp + amount
         if not overflow and self.max_hp is not None:
-            new_hp = max(0, min(new_hp, self.max_hp))
-        self._data["hp"] = new_hp
-        return new_hp
+            new_hp = min(new_hp, self.max_hp)
+        self.set_hp(new_hp)
+        return self.hp_str()
 
     def hp_str(self) -> str:
-        """String summary of HP and temp HP."""
-        return f"{self.hp}/{self.max_hp} (+{self.temp_hp} temp)"
+        result = f"{self.hp}/{self.max_hp}"
+        return result + (f" ({self.temp_hp} temp)" if self.temp_hp else "")
 
-    def reset_hp(self) -> int:
-        """Restore to max HP and clear temp HP."""
-        if self.max_hp is not None:
-            self._data["hp"] = self.max_hp
+    def reset_hp(self) -> None:
+        self._data["hp"] = self.max_hp
         self._data["temp_hp"] = 0
-        return self.hp or 0
 
-    def set_temp_hp(self, new_temp: int) -> int:
-        """Set temporary hit points."""
-        self._data["temp_hp"] = int(new_temp)
-        return self.temp_hp
+    def set_temp_hp(self, new_temp: int) -> None:
+        self._data["temp_hp"] = max(0, int(new_temp))
 
     def __getattr__(self, item: str) -> Any:
         return self._data.get(item)
@@ -1339,11 +1400,14 @@ class CharacterAPI(AliasStatBlock):
     @property
     def consumables(self) -> list[AliasCustomCounter]:
         """Custom counters/consumables on the character."""
-        return [AliasCustomCounter(v) for v in self._consumable_map().values()]
+        return [self.cc(name) for name in self._consumable_map()]
 
     def cc(self, name: str) -> AliasCustomCounter:
-        """Get (or create placeholder for) a custom counter by name."""
-        return AliasCustomCounter(self._consumable_map()[str(name)])
+        """Get an existing custom counter."""
+        if str(name) not in self._consumable_map():
+            raise ConsumableException(f"There is no counter named {name}.")
+        names = {**self.cvars, **derive_character_cvars(self._data)}
+        return AliasCustomCounter(self._consumable_map()[str(name)], names)
 
     def get_cc(self, name: str) -> int:
         """Current value of a custom counter."""
@@ -1357,27 +1421,17 @@ class CharacterAPI(AliasStatBlock):
         """Minimum value for a custom counter."""
         return self.cc(name).min
 
-    def set_cc(
-        self, name: str, value: int | None = None, maximum: int | None = None, minimum: int | None = None
-    ) -> int:
-        """Set value/max/min for a custom counter."""
-        con = self._consumable_map().setdefault(str(name), {"name": str(name)})
-        if value is not None:
-            con["value"] = int(value)
-        if maximum is not None:
-            con["max"] = int(maximum)
-        if minimum is not None:
-            con["min"] = int(minimum)
-        return _safe_int(con.get("value"), 0)
+    def set_cc(self, name: str, value: int, strict: bool = False) -> int:
+        return self.cc(name).set(int(value), strict)
 
     def mod_cc(self, name: str, val: int, strict: bool = False) -> int:
         """Modify a custom counter by `val` (optionally enforcing bounds)."""
         counter = self.cc(name)
         return counter.mod(val, strict)
 
-    def delete_cc(self, name: str) -> Any:
-        """Remove a custom counter and return its payload."""
-        return self._consumable_map().pop(str(name), None)
+    def delete_cc(self, name: str) -> None:
+        self.cc(name)
+        del self._consumable_map()[str(name)]
 
     def create_cc_nx(
         self,
@@ -1424,18 +1478,40 @@ class CharacterAPI(AliasStatBlock):
         """Create or overwrite a custom counter."""
         payload = {
             "name": str(name),
-            "min": _safe_int(minVal, -(2**31)) if minVal is not None else -(2**31),
-            "max": _safe_int(maxVal, 2**31 - 1) if maxVal is not None else 2**31 - 1,
+            "min": minVal,
+            "max": maxVal,
             "reset_on": reset,
             "display_type": dispType,
-            "reset_to": _safe_int(reset_to) if reset_to is not None else None,
+            "reset_to": reset_to,
             "reset_by": reset_by,
             "title": title,
             "desc": desc,
             "value": _safe_int(initial_value, 0) if initial_value is not None else 0,
         }
+        names = {**self.cvars, **derive_character_cvars(self._data)}
+        counter = AliasCustomCounter(payload, names)
+        if counter.min > counter.max:
+            raise ValueError("Max value is less than min value.")
+        if reset not in (None, "none", "short", "long", "hp"):
+            raise ValueError("Invalid counter reset.")
+        if reset_to is not None and reset_by is not None:
+            raise ValueError("Cannot specify both reset_to and reset_by.")
+        if reset_by is not None:
+            d20.parse(re.sub(r"\{([^}]+)\}", lambda m: str(_counter_math(m.group(1), names)), reset_by))
+        initial = (
+            _counter_math(initial_value, names)
+            if initial_value is not None
+            else (
+                counter.reset_to
+                if counter.reset_to is not None
+                else counter.max
+                if maxVal is not None
+                else max(0, counter.min)
+            )
+        )
+        counter.set(initial)
         self._consumable_map()[str(name)] = payload
-        return AliasCustomCounter(payload)
+        return counter
 
     def edit_cc(
         self,
@@ -1451,7 +1527,7 @@ class CharacterAPI(AliasStatBlock):
         new_name: str | None = None,
     ) -> AliasCustomCounter:
         """Edit fields on an existing custom counter."""
-        counter = dict(self._consumable_map().get(str(name)) or {"name": str(name)})
+        counter = dict(self.cc(name)._data)
         for key, val in (
             ("min", minVal),
             ("max", maxVal),
@@ -1467,7 +1543,9 @@ class CharacterAPI(AliasStatBlock):
         counter["name"] = str(new_name) if new_name else counter.get("name", str(name))
         self._consumable_map().pop(str(name), None)
         self._consumable_map()[counter["name"]] = counter
-        return AliasCustomCounter(counter)
+        result = self.cc(counter["name"])
+        result.set(result.value)
+        return result
 
     def cc_exists(self, name: str) -> bool:
         """Return True if a custom counter with the name exists."""
@@ -1690,19 +1768,8 @@ class SimpleCombatant(AliasStatBlock):
         overheal: bool = False,
     ) -> dict[str, Any]:
         """Apply damage expression to the combatant and return the roll breakdown."""
-        expr = str(dice_str)
-        if crit:
-            expr = f"({expr})*2"
-        if d is not None:
-            expr = f"({expr})+({d})"
-        if c is not None and crit:
-            expr = f"({expr})+({c})"
-        if critdice:
-            expr = f"({expr})+{int(critdice)}"
-        try:
-            roll_result = d20.roll(expr)
-        except Exception:
-            roll_result = d20.roll("0")
+        roll_result = roll_damage(dice_str, self.resistances, crit=crit, d=d, c=c, critdice=critdice)
+        self.modify_hp(-int(roll_result.total), overflow=overheal)
         label = "Damage (CRIT!)" if crit else "Damage"
         return {
             "damage": f"**{label}**: {roll_result}",

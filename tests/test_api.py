@@ -80,9 +80,10 @@ def test_character_consumables_normalized_and_mutated():
     assert char.cc_exists("Arrows")
     assert char.get_cc("Arrows") == 20
     assert char.mod_cc("Arrows", -5) == 15
-    assert char.set_cc("Arrows", value=10, maximum=50) == 10
+    char.edit_cc("Arrows", maxVal="50")
+    assert char.set_cc("Arrows", value=10, strict=True) == 10
     assert char.get_cc_max("Arrows") == 50
-    assert char.delete_cc("Arrows") is not None
+    assert char.delete_cc("Arrows") is None
     assert not char.cc_exists("Arrows")
 
 
@@ -111,3 +112,104 @@ def test_spellbook_slot_helpers_and_casting():
 
     book.reset_pact_slots()
     assert book.num_pact_slots == 2
+
+
+def test_damage_mutates_hp_and_absorbs_temp_hp():
+    from avrae_ls.runtime.api import SimpleCombatant
+
+    target = SimpleCombatant({"hp": 20, "max_hp": 20, "temp_hp": 3})
+    result = target.damage("5")
+    assert result["total"] == 5
+    assert target.hp == 18 and target.temp_hp == 0
+    target.damage("-10")
+    assert target.hp == 20
+    target.damage("-10", overheal=True)
+    assert target.hp == 30
+    target.damage("100")
+    assert target.hp == 0
+
+
+def test_critical_damage_doubles_dice_only():
+    from avrae_ls.runtime.api import SimpleCombatant
+
+    target = SimpleCombatant({"hp": 100})
+    assert target.damage("2d1+3", crit=True, d="1d1", c="1d1", critdice=1)["total"] == 11
+    assert target.damage("2d1+3", crit=False, critdice=20, c="100")["total"] == 5
+
+
+def test_damage_applies_typed_and_conditional_resistances():
+    from avrae_ls.runtime.api import SimpleCombatant
+
+    target = SimpleCombatant(
+        {
+            "hp": 100,
+            "resistances": {
+                "resist": [{"dtype": "fire"}, {"dtype": "slashing", "unless": ["magical"]}],
+                "vuln": [{"dtype": "cold"}],
+                "immune": [{"dtype": "poison"}],
+            },
+        }
+    )
+    assert target.damage("5[fire]+3[cold]+10[poison]")["total"] == 8
+    assert target.damage("6[magical slashing]")["total"] == 6
+    assert target.damage("6[slashing]")["total"] == 3
+    assert target.hp == 83
+
+
+def test_hp_mutator_contracts():
+    from avrae_ls.runtime.api import SimpleCombatant
+
+    target = SimpleCombatant({"hp": 10, "max_hp": 20, "temp_hp": 4})
+    assert target.modify_hp(-3, ignore_temp=True) == "7/20 (4 temp)"
+    assert target.temp_hp == 4
+    assert target.set_hp(-1) is None and target.hp == 0
+    assert target.set_temp_hp(-1) is None and target.temp_hp == 0
+
+
+def test_counter_reset_contract_and_bounds():
+    import pytest
+    from avrae_ls.runtime.api import NoReset, CounterOutOfBounds
+
+    char = CharacterAPI({"stats": {"strength": 16}})
+    cc = char.create_cc("Uses", minVal="0", maxVal="strengthMod", reset_by="2d1", initial_value="2")
+    result = cc.reset()
+    assert (result.new_value, result.old_value, result.target_value) == (3, 2, 4)
+    assert isinstance(result.delta, str)
+    assert tuple(result)[:3] == (3, 2, 4)
+    with pytest.raises(CounterOutOfBounds):
+        char.set_cc("Uses", 4, strict=True)
+    assert char.set_cc("Uses", 4) == 3
+    with pytest.raises(NoReset):
+        char.create_cc("Unbounded").reset()
+    with pytest.raises(NoReset):
+        char.create_cc("Never", maxVal="3", reset="none").reset()
+    fixed = char.create_cc("Fixed", maxVal="10", reset_to="5", initial_value="2").reset()
+    assert fixed.delta == "+3"
+
+
+def test_counter_missing_does_not_create_placeholder():
+    import pytest
+    from avrae_ls.runtime.api import ConsumableException
+
+    char = CharacterAPI({})
+    with pytest.raises(ConsumableException):
+        char.set_cc("missing", 1)
+    assert not char.cc_exists("missing")
+
+
+def test_slots_exhaustion_json_keys_and_pact_preference():
+    import pytest
+    from avrae_ls.runtime.api import AliasSpellbook, CounterOutOfBounds
+
+    book = AliasSpellbook(
+        {"slots": {"2": 3}, "max_slots": {"2": 4}, "pact_slot_level": 2, "num_pact_slots": 2, "max_pact_slots": 2}
+    )
+    book.use_slot(2)
+    assert book.get_slots(2) == 2 and book.num_pact_slots == 1
+    book.set_slots(2, 1, pact=False)
+    assert book.num_pact_slots == 1
+    book.reset_pact_slots()
+    assert book.get_slots(2) == 2 and book.num_pact_slots == 2
+    book.set_slots(2, 0)
+    with pytest.raises(CounterOutOfBounds):
+        book.use_slot(2)
