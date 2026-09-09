@@ -17,6 +17,7 @@ from avrae_ls.config import DiagnosticSettings
 from avrae_ls.runtime.context import ContextData, GVarResolver
 from avrae_ls.analysis.parser import wrap_draconic
 from avrae_ls.lsp.lsp_utils import range_from_positions, shift_range
+from avrae_ls.analysis.language_validation import unsupported_syntax, literal_truth, nonempty_iterable, terminates
 from avrae_ls.analysis.ast_utils import collect_target_names
 from avrae_ls.runtime.runtime import MockExecutor, _default_builtins
 
@@ -85,6 +86,7 @@ class DiagnosticProvider:
             diagnostics.append(_syntax_from_std(exc))
             return diagnostics
 
+        diagnostics.extend(_make_diagnostic(node, message, "error") for node, message in unsupported_syntax(body))
         diagnostics.extend(self._check_unknown_names(body, ctx_data, self._settings.semantic_level, bindings))
         diagnostics.extend(await _check_gvars(body, gvar_resolver, self._settings))
         diagnostics.extend(_check_imports(body, self._settings.semantic_level))
@@ -142,10 +144,17 @@ class DiagnosticProvider:
                 self._define(_names_in_target(node.target))
 
             def visit_AugAssign(self, node: ast.AugAssign):
+                if isinstance(node.target, ast.Name):
+                    self.visit_Name(ast.copy_location(ast.Name(id=node.target.id, ctx=ast.Load()), node.target))
+                else:
+                    self.visit(node.target)
                 self.visit(node.value)
                 self._define(_names_in_target(node.target))
 
             def visit_FunctionDef(self, node: ast.FunctionDef):
+                for default in [*node.args.defaults, *node.args.kw_defaults]:
+                    if default is not None:
+                        self.visit(default)
                 self._define([node.name])
                 self._function_depth += 1
                 try:
@@ -173,35 +182,107 @@ class DiagnosticProvider:
                 self._define([node.name])
                 self._with_new_scope(lambda _: None, None, node.body)
 
+            def _branch(self, statements, initial):
+                self._scopes[-1] = set(initial)
+                for statement in statements:
+                    self.visit(statement)
+                    if terminates([statement]):
+                        break
+                return set(self._current)
+
+            def visit_If(self, node: ast.If):
+                self.visit(node.test)
+                initial = set(self._current)
+                yes = self._branch(node.body, initial)
+                no = self._branch(node.orelse, initial)
+                truth = literal_truth(node.test)
+                if truth is True:
+                    merged = yes
+                elif truth is False:
+                    merged = no
+                elif terminates(node.body):
+                    merged = no
+                elif terminates(node.orelse):
+                    merged = yes
+                else:
+                    merged = yes & no
+                self._scopes[-1] = merged
+
+            def visit_IfExp(self, node: ast.IfExp):
+                self.visit(node.test)
+                initial = set(self._current)
+                self.visit(node.body)
+                yes = set(self._current)
+                self._scopes[-1] = set(initial)
+                self.visit(node.orelse)
+                self._scopes[-1].intersection_update(yes)
+
+            def visit_BoolOp(self, node: ast.BoolOp):
+                self.visit(node.values[0])
+                initial = set(self._current)
+                for value in node.values[1:]:
+                    self.visit(value)
+                self._scopes[-1] = initial
+
             def visit_For(self, node: ast.For):
                 self.visit(node.iter)
-                self._define(_names_in_target(node.target))
-                for stmt in node.body:
-                    self.visit(stmt)
-                for stmt in node.orelse:
-                    self.visit(stmt)
+                initial = set(self._current)
+                targets = set(_names_in_target(node.target))
+                after = self._branch(node.body, initial | targets)
+                # Unknown iterables may be empty; no new binding is definite.
+                merged = after if nonempty_iterable(node.iter) is True else initial
+                self._branch(node.orelse, merged)
+                # A break can bypass loop else.
+                if any(isinstance(item, ast.Break) for stmt in node.body for item in ast.walk(stmt)):
+                    self._scopes[-1] = merged
 
-            def visit_AsyncFor(self, node: ast.AsyncFor):
-                self.visit(node.iter)
-                self._define(_names_in_target(node.target))
-                for stmt in node.body:
-                    self.visit(stmt)
-                for stmt in node.orelse:
-                    self.visit(stmt)
+            def visit_While(self, node: ast.While):
+                self.visit(node.test)
+                initial = set(self._current)
+                self._branch(node.body, initial)
+                self._branch(node.orelse, initial)
+                if any(isinstance(item, ast.Break) for stmt in node.body for item in ast.walk(stmt)):
+                    self._scopes[-1] = initial
 
-            def visit_With(self, node: ast.With):
-                for item in node.items:
-                    if item.optional_vars:
-                        self._define(_names_in_target(item.optional_vars))
-                for stmt in node.body:
-                    self.visit(stmt)
+            def visit_Try(self, node: ast.Try):
+                initial = set(self._current)
+                success = self._branch(node.body, initial)
+                success = self._branch(node.orelse, success)
+                paths = [] if terminates(node.body) or terminates(node.orelse) else [success]
+                for handler in node.handlers:
+                    after = self._branch(handler.body, initial)
+                    if not terminates(handler.body):
+                        paths.append(after)
+                merged = set.intersection(*paths) if paths else initial
+                self._branch(node.finalbody, merged)
 
-            def visit_AsyncWith(self, node: ast.AsyncWith):
-                for item in node.items:
-                    if item.optional_vars:
-                        self._define(_names_in_target(item.optional_vars))
-                for stmt in node.body:
-                    self.visit(stmt)
+            def visit_Match(self, node: ast.Match):
+                self.visit(node.subject)
+                initial = set(self._current)
+                paths = []
+                exhaustive = False
+                for case in node.cases:
+                    self._scopes[-1] = set(initial)
+                    captures = {
+                        item.name
+                        for item in ast.walk(case.pattern)
+                        if isinstance(item, (ast.MatchAs, ast.MatchStar)) and item.name
+                    }
+                    captures.update(
+                        item.rest for item in ast.walk(case.pattern) if isinstance(item, ast.MatchMapping) and item.rest
+                    )
+                    self._define(captures)
+                    self.visit(case.pattern)
+                    if case.guard:
+                        self.visit(case.guard)
+                    after = self._branch(case.body, self._current)
+                    if not terminates(case.body):
+                        paths.append(after)
+                    if isinstance(case.pattern, ast.MatchAs) and case.pattern.pattern is None and case.guard is None:
+                        exhaustive = True
+                if not exhaustive:
+                    paths.append(initial)
+                self._scopes[-1] = set.intersection(*paths) if paths else initial
 
             def visit_ListComp(self, node: ast.ListComp):
                 self._visit_comprehension(node.elt, node.generators)

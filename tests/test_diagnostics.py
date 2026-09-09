@@ -255,3 +255,75 @@ async def test_template_bindings_are_shared(tmp_path):
     provider = DiagnosticProvider(MockExecutor(), config.diagnostics)
     diagnostics = await provider.analyze("echo <drac2>x=7</drac2>{{x}}", builder.build(), builder.gvar_resolver)
     assert not diagnostics
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code, expected",
+    [
+        ("class Foo:\n    pass", "ClassDef"),
+        ("async def f():\n    pass", "AsyncFunctionDef"),
+        ("with ctx:\n    pass", "With"),
+        ("assert True", "Assert"),
+        ("x=1\ndel x", "Delete"),
+        ("break", "Loop control"),
+        ("for i in range(1):\n    def f():\n        break", "Loop control"),
+        ('ctx.name="new"', "assignment target"),
+        ("try:\n    1/0\nexcept ValueError:\n    pass", "string literals"),
+        ('try:\n    1/0\nexcept "ValueError" as error:\n    pass', "except ... as name"),
+    ],
+)
+async def test_unsupported_draconic_syntax(tmp_path, code, expected):
+    from avrae_ls.config import AvraeLSConfig
+    from avrae_ls.runtime.context import ContextBuilder
+
+    config = AvraeLSConfig.default(tmp_path)
+    builder = ContextBuilder(config)
+    provider = DiagnosticProvider(MockExecutor(), config.diagnostics)
+    diagnostics = await provider.analyze(code, builder.build(), builder.gvar_resolver, treat_as_module=True)
+    assert any(expected in d.message and d.severity.value == 1 for d in diagnostics)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code, undefined",
+    [
+        ("x += 1", True),
+        ("if False:\n    x=1\nreturn x", True),
+        ('if get("flag"):\n    x=1\nreturn x', True),
+        ('if get("flag"):\n    x=1\nelse:\n    x=2\nreturn x', False),
+        ("if True:\n    x=1\nreturn x", False),
+        ("for x in []:\n    pass\nreturn x", True),
+        ('for x in get("items", []):\n    pass\nreturn x', True),
+        ("for x in range(1):\n    pass\nreturn x", False),
+        ("while False:\n    x=1\nreturn x", True),
+        ('try:\n    x=1\nexcept "ValueError":\n    pass\nreturn x', True),
+        ('try:\n    x=1\nexcept "ValueError":\n    x=2\nreturn x', False),
+        ("try:\n    pass\nfinally:\n    x=1\nreturn x", False),
+        ("x=1\ndef f():\n    x+=1\n    return x\nreturn f()", False),
+        ("def f(arg=x):\n    return arg", True),
+        ("match 1:\n    case x:\n        pass\nreturn x", False),
+        ("False and (x := 1)\nreturn x", True),
+    ],
+)
+async def test_control_flow_name_analysis(tmp_path, code, undefined):
+    from avrae_ls.config import AvraeLSConfig
+    from avrae_ls.runtime.context import ContextBuilder
+
+    config = AvraeLSConfig.default(tmp_path)
+    builder = ContextBuilder(config)
+    provider = DiagnosticProvider(MockExecutor(), config.diagnostics)
+    diagnostics = await provider.analyze(code, builder.build(), builder.gvar_resolver, treat_as_module=True)
+    assert any("'x' may be undefined" in d.message for d in diagnostics) is undefined
+
+
+@pytest.mark.asyncio
+async def test_draconic_string_exception_handlers_are_valid(tmp_path):
+    from avrae_ls.config import AvraeLSConfig
+    from avrae_ls.runtime.context import ContextBuilder
+
+    config = AvraeLSConfig.default(tmp_path)
+    builder = ContextBuilder(config)
+    provider = DiagnosticProvider(MockExecutor(), config.diagnostics)
+    code = 'try:\n    1/0\nexcept ("ZeroDivisionError", "ValueError"):\n    pass'
+    assert not await provider.analyze(code, builder.build(), builder.gvar_resolver)
