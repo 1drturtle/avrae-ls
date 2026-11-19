@@ -11,7 +11,7 @@ import re
 import time
 import uuid
 from types import SimpleNamespace
-from collections import OrderedDict, UserList
+from collections import OrderedDict, UserList, UserString
 import yaml
 from dataclasses import dataclass
 from typing import Any, Dict, Set, Callable
@@ -160,13 +160,16 @@ def _load_yaml(data: Any) -> Any:
 
 
 def _yaml_dumper():
-    """Create a dumper that knows how to serialize draconic SafeList/SafeDict/SafeSet."""
+    """Create a safe dumper for Draconic strings and containers."""
 
     class DraconicDumper(yaml.SafeDumper):
         pass
 
     def _represent_user_list(dumper: Any, data: UserList):
         return dumper.represent_sequence(dumper.DEFAULT_SEQUENCE_TAG, list(data))
+
+    def _represent_user_string(dumper: Any, data: UserString):
+        return dumper.represent_str(str(data))
 
     def _represent_dict(dumper: Any, data: dict):
         return dumper.represent_dict(dict(data))
@@ -175,6 +178,7 @@ def _yaml_dumper():
         return dumper.represent_sequence(dumper.DEFAULT_SEQUENCE_TAG, list(data))
 
     DraconicDumper.add_multi_representer(UserList, _represent_user_list)
+    DraconicDumper.add_multi_representer(UserString, _represent_user_string)
     DraconicDumper.add_multi_representer(dict, _represent_dict)
     DraconicDumper.add_multi_representer(set, _represent_set)
     return DraconicDumper

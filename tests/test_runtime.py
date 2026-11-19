@@ -1,5 +1,6 @@
 import httpx
 import pytest
+import yaml
 
 from avrae_ls.runtime.argparser import InvalidArgument
 from avrae_ls.config import AvraeLSConfig, VarSources
@@ -12,6 +13,7 @@ from avrae_ls.runtime.runtime import (
     FunctionRequiresCharacter,
     InstructionBudget,
     MockExecutor,
+    _dump_yaml,
     _parse_coins,
 )
 
@@ -78,6 +80,36 @@ async def test_mock_executor_runs_code(tmp_path):
     assert result.error is None
     assert result.value == 3
     assert result.stdout == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("'text'", "text"),
+        ("{'key': 'value'}", {"key": "value"}),
+        ("['text']", ["text"]),
+        ("{'nested': ['', 'yes', 'a: b', 'café']}", {"nested": ["", "yes", "a: b", "café"]}),
+    ],
+)
+async def test_dump_yaml_serializes_draconic_strings(tmp_path, expression, expected):
+    result = await MockExecutor().run(f"dump_yaml({expression})", _ctx(), _resolver(tmp_path))
+
+    assert result.error is None
+    assert yaml.safe_load(result.value) == expected
+
+
+@pytest.mark.asyncio
+async def test_dump_yaml_respects_indent(tmp_path):
+    result = await MockExecutor().run("dump_yaml({'key': {'nested': 'value'}}, 4)", _ctx(), _resolver(tmp_path))
+
+    assert result.error is None
+    assert result.value == "key:\n    nested: value\n"
+
+
+def test_dump_yaml_rejects_unsupported_objects():
+    with pytest.raises(yaml.representer.RepresenterError):
+        _dump_yaml(object())
 
 
 @pytest.mark.asyncio
