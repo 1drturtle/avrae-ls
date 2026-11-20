@@ -120,6 +120,19 @@ The expected section is YAML/JSON. That means numbers are numbers, lists are lis
 3
 ```
 
+For multiline text containing command lines, use a YAML block scalar:
+
+```yaml
+!summon
+---
+|
+  multiline
+  !init add 18 "Summon"
+  !tembed -title "Summoned!"
+```
+
+Indented `!` and `---` lines inside a block scalar are part of the value. Outside a block scalar, a line beginning with `!` starts the next test.
+
 ### Embed comparison (partial match)
 
 If the alias returns an embed, compare it with a YAML/JSON dictionary. Only the keys you include are checked.
@@ -250,7 +263,7 @@ vars:
 
 ## Common tips
 
-- Expected output cannot include a line that starts with `!` because that marks the next test. If you need to check a `!` line, use a single-line string like `"line1\n!line2"` or a regex like `re:^!`.
+- To check a `!` line in expected output, use a YAML block scalar, a single-line string like `"line1\n!line2"`, or a regex like `re:^!`.
 - If you want a number treated as text, wrap it in quotes (YAML reads bare numbers as numbers).
 - The mock context comes from `.avraels.json` and any var files you configure there (including gvar `{ filePath: ... }` entries). Metadata `vars` and `character` values are merged on top of those defaults for the test only.
 - `profile` applies per test case. If omitted, tests use the workspace default profile. Metadata `vars` and `character` still apply as per-test overlays on top of the selected profile.

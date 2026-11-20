@@ -325,6 +325,40 @@ async def test_parses_multiple_tests_in_one_file(tmp_path):
     assert all(res.passed for res in results)
 
 
+@pytest.mark.asyncio
+async def test_block_scalar_commands_are_expected_output(tmp_path):
+    (tmp_path / "multi.alias").write_text('!alias multi multiline\n!init add 18 "Summon"\n!tembed -title test')
+    test_path = tmp_path / "multi.aliastest"
+    test_path.write_text(
+        '!multi\n---\n|\n  multiline\n  !init add 18 "Summon"\n  !tembed -title test\n---\nname: summon\n'
+    )
+
+    cases = parse_alias_tests(test_path)
+    assert len(cases) == 1
+    assert cases[0].expected == 'multiline\n!init add 18 "Summon"\n!tembed -title test'
+    config = AvraeLSConfig.default(tmp_path)
+    result = (await run_alias_tests(cases, ContextBuilder(config), MockExecutor()))[0]
+    assert result.passed
+
+
+@pytest.mark.parametrize("indicator", ["|", "|-", "|2+", ">", ">-", ">2-"])
+def test_block_scalars_preserve_boundaries_and_following_tests(tmp_path, indicator):
+    (tmp_path / "multi.alias").write_text("!alias multi echo hi")
+    test_path = tmp_path / "multi.aliastest"
+    test_path.write_text(
+        f"!multi\n---\n{indicator}\n  first\n  !init add 18\n  ---\n\n  last\n"
+        "---\nname: first\nvars:\n  cvars:\n    note: |\n      !inside metadata\n      ---\n"
+        "  !multi\n---\nhi\n"
+    )
+
+    cases = parse_alias_tests(test_path)
+    assert len(cases) == 2
+    assert "!init add 18" in cases[0].expected
+    assert "---" in cases[0].expected
+    assert cases[0].var_overrides == {"cvars": {"note": "!inside metadata\n---"}}
+    assert cases[1].expected == "hi"
+
+
 def test_parse_alias_test_requires_alias_file(tmp_path):
     test_path = tmp_path / "test-missing.alias-test"
     test_path.write_text("!missing\n---\nexpected\n")

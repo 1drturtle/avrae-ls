@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+import yaml
+
 from avrae_ls.runtime import argparser as avrae_argparser
 from avrae_ls.runtime.alias_preview import render_alias_command, simulate_command
 from avrae_ls.runtime.context import ContextBuilder, ContextData, normalize_gvars
@@ -28,6 +30,23 @@ log = logging.getLogger(__name__)
 
 class AliasTestError(Exception):
     """Raised when an alias test cannot be parsed or executed."""
+
+
+def _inside_block_scalar(section_lines: list[str], line: str) -> bool:
+    """Check a possible boundary using YAML's own block-scalar indentation rules."""
+    candidate_line = len(section_lines)
+    try:
+        for token in yaml.scan("\n".join([*section_lines, line, ""])):
+            if (
+                isinstance(token, yaml.ScalarToken)
+                and token.style in ("|", ">")
+                and token.start_mark.line < candidate_line < token.end_mark.line
+            ):
+                return True
+    except yaml.YAMLError:
+        # An incomplete or invalid section is handled by the normal YAML parser.
+        pass
+    return False
 
 
 @dataclass
@@ -105,14 +124,19 @@ def parse_alias_tests(path: Path) -> list[AliasTestCase]:
         idx += 1  # consume first ---
 
         expected_lines: list[str] = []
-        while idx < len(lines) and lines[idx].strip() != "---" and not lines[idx].lstrip().startswith("!"):
+        while idx < len(lines):
+            boundary = lines[idx].strip() == "---" or lines[idx].lstrip().startswith("!")
+            if boundary and not _inside_block_scalar(expected_lines, lines[idx]):
+                break
             expected_lines.append(lines[idx])
             idx += 1
 
         meta_lines: list[str] = []
         if idx < len(lines) and lines[idx].strip() == "---":
             idx += 1  # consume second ---
-            while idx < len(lines) and not lines[idx].lstrip().startswith("!"):
+            while idx < len(lines):
+                if lines[idx].lstrip().startswith("!") and not _inside_block_scalar(meta_lines, lines[idx]):
+                    break
                 meta_lines.append(lines[idx])
                 idx += 1
 
