@@ -45,6 +45,31 @@ def test_completion_round_trip_integration():
     assert "attacks" in labels
 
 
+@pytest.mark.parametrize(
+    "uri", ["file:///library.gvar", "file:///library.alias-module", "avrae-gvar://gvar/remote.gvar"]
+)
+def test_module_editor_does_not_expose_implicit_character_variables(uri):
+    code = "def foo():\n    return proficiencyBonus"
+    server = _server_with_doc(code, uri)
+    position = types.Position(line=1, character=len("    return proficiencyBon"))
+    document = types.TextDocumentIdentifier(uri=uri)
+    hover = on_hover(server, types.HoverParams(text_document=document, position=position))
+    assert hover is None
+    items = on_completion(server, types.CompletionParams(text_document=document, position=position, context=None))
+    assert "proficiencyBonus" not in {item.label for item in items}
+
+
+def test_alias_editor_exposes_implicit_character_variables():
+    uri = "file:///integration.alias"
+    code = "proficiencyBonus"
+    server = _server_with_doc(code, uri)
+    position = types.Position(line=0, character=5)
+    document = types.TextDocumentIdentifier(uri=uri)
+    assert on_hover(server, types.HoverParams(text_document=document, position=position)) is not None
+    items = on_completion(server, types.CompletionParams(text_document=document, position=position, context=None))
+    assert "proficiencyBonus" in {item.label for item in items}
+
+
 def test_using_module_completion_and_remote_definition():
     code = 'using(lib="remote")\nlib.heal'
     uri = "file:///module-completion.alias"

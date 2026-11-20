@@ -272,10 +272,10 @@ async def test_gvar_tests_support_per_case_profiles(tmp_path):
 @pytest.mark.asyncio
 async def test_gvar_tests_profile_overrides_still_apply_on_selected_profile(tmp_path):
     gvar_path = tmp_path / "ctxcheck.gvar"
-    gvar_path.write_text("answer = [character().name, get('hp')]\n")
+    gvar_path.write_text("answer = character().name\n")
     test_path = tmp_path / "ctxcheck.gvar-test"
     test_path.write_text(
-        'return ctxcheck.answer\n---\n- Tester\n- "99"\n---\nprofile: gm\nvars:\n  cvars:\n    hp: 99\ncharacter:\n  name: Tester\n'
+        'return [ctxcheck.answer, get("hp")]\n---\n- Tester\n- "99"\n---\nprofile: gm\nvars:\n  cvars:\n    hp: 99\ncharacter:\n  name: Tester\n'
     )
 
     config = AvraeLSConfig.default(tmp_path)

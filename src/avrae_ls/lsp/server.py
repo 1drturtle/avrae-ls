@@ -303,8 +303,10 @@ def on_signature_help(server: AvraeLanguageServer, params: types.SignatureHelpPa
 def on_completion(server: AvraeLanguageServer, params: types.CompletionParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
     ctx_data = server.state.context_builder.build()
-    suggestions = gather_suggestions(ctx_data, server.state.context_builder.gvar_resolver, server._signatures)
     is_module = _is_alias_module_document(doc)
+    suggestions = gather_suggestions(
+        ctx_data, server.state.context_builder.gvar_resolver, server._signatures, treat_as_module=is_module
+    )
     source_ctx = build_source_context(doc.source, is_module)
     selected = code_for_position(source_ctx, params.position.line, params.position.character)
     if selected is None:
@@ -331,6 +333,7 @@ def on_hover(server: AvraeLanguageServer, params: types.HoverParams):
         server._signatures,
         ctx_data,
         server.state.context_builder.gvar_resolver,
+        treat_as_module=is_module,
     )
 
 
@@ -667,6 +670,8 @@ def _is_alias_module_document(doc: Any) -> bool:
     uri = getattr(doc, "uri", None)
     if not isinstance(uri, str):
         return False
+    if uri.startswith("avrae-gvar://"):
+        return True
     try:
         fs_path = uris.to_fs_path(uri)
         if not fs_path:

@@ -673,6 +673,26 @@ async def test_get_resolution_order(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_imported_module_uses_its_own_variable_scope(tmp_path):
+    ctx = ContextData(vars=VarSources(cvars={"proficiencyBonus": 3}, uvars={"setting": "yes"}))
+    resolver = _resolver(tmp_path)
+    resolver.seed(
+        {
+            "inner": "def read():\n    return [get('proficiencyBonus', 'missing'), exists('setting')]",
+            "outer": "using(inner='inner')\nvalue = inner.read()\nproficiencyBonus = 9\ndef read():\n    return proficiencyBonus",
+            "bad": "def foo():\n    return proficiencyBonus",
+        }
+    )
+    executor = MockExecutor()
+    result = await executor.run("using(mod='outer')\n[mod.value, mod.read(), proficiencyBonus]", ctx, resolver)
+    assert result.error is None
+    assert result.value == [["missing", False], 9, 3]
+    result = await executor.run("using(mod='bad')\nmod.foo()", ctx, resolver)
+    assert result.error is not None
+    assert "proficiencyBonus" in str(result.error)
+
+
+@pytest.mark.asyncio
 async def test_verify_signature_cached(monkeypatch, tmp_path):
     executor = MockExecutor()
     ctx = _ctx()

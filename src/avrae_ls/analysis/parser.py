@@ -25,7 +25,7 @@ ALIAS_MODULE_SUFFIX = ".alias-module"
 def is_alias_module_path(path: str | Path | None) -> bool:
     if path is None:
         return False
-    return str(path).endswith(ALIAS_MODULE_SUFFIX)
+    return str(path).endswith((ALIAS_MODULE_SUFFIX, ".gvar"))
 
 
 def _full_source_block(source: str) -> DraconicBlock:

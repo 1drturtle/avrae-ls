@@ -19,6 +19,21 @@ def _resolver(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_module_function_does_not_inherit_character_variables(tmp_path):
+    ctx = ContextData(vars=VarSources(cvars={"proficiencyBonus": 3}, uvars={"setting": "yes"}))
+    code = "def foo():\n    return proficiencyBonus + setting"
+    provider = _provider()
+    module = await provider.analyze(code, ctx, _resolver(tmp_path), treat_as_module=True)
+    assert all(
+        any(name in d.message and "undefined" in d.message for d in module) for name in ("proficiencyBonus", "setting")
+    )
+    alias = await provider.analyze(code, ctx, _resolver(tmp_path))
+    assert not any("undefined" in d.message for d in alias)
+    defined = await provider.analyze("proficiencyBonus = 3\n" + code, ctx, _resolver(tmp_path), treat_as_module=True)
+    assert not any("proficiencyBonus" in d.message and "undefined" in d.message for d in defined)
+
+
+@pytest.mark.asyncio
 async def test_reports_syntax_error(tmp_path):
     provider = _provider()
     resolver = _resolver(tmp_path)

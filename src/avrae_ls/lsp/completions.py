@@ -40,6 +40,8 @@ def gather_suggestions(
     ctx_data: ContextData,
     resolver: GVarResolver,
     sigs: Dict[str, FunctionSig],
+    *,
+    treat_as_module: bool = False,
 ) -> List[Suggestion]:
     suggestions: list[Suggestion] = []
 
@@ -53,7 +55,7 @@ def gather_suggestions(
             )
         )
 
-    vars_map = ctx_data.vars.to_initial_names()
+    vars_map = {} if treat_as_module else ctx_data.vars.to_initial_names()
     for name in vars_map:
         suggestions.append(Suggestion(name=name, kind=types.CompletionItemKind.Variable, detail="var"))
 
@@ -210,6 +212,8 @@ def hover_for_position(
     sigs: Dict[str, FunctionSig],
     ctx_data: ContextData,
     resolver: GVarResolver,
+    *,
+    treat_as_module: bool = False,
 ) -> Optional[types.Hover]:
     line_text = _line_text(code, line)
     type_map = infer_type_map(code, line)
@@ -248,7 +252,7 @@ def hover_for_position(
         contents = f"```avrae\n{sig.label}\n```\n\n{sig.doc}"
         return types.Hover(contents=types.MarkupContent(kind=types.MarkupKind.Markdown, value=contents))
 
-    vars_map = ctx_data.vars.to_initial_names()
+    vars_map = {} if treat_as_module else ctx_data.vars.to_initial_names()
     if word in vars_map:
         return _format_binding_hover(word, vars_map[word], "var")
 

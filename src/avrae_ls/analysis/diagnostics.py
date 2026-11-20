@@ -53,12 +53,16 @@ class DiagnosticProvider:
             if plain is not None:
                 diagnostics.extend(plain)
                 return diagnostics
-            diagnostics.extend(await self._analyze_code(source_ctx.prepared, ctx_data, gvar_resolver))
+            diagnostics.extend(
+                await self._analyze_code(source_ctx.prepared, ctx_data, gvar_resolver, treat_as_module=treat_as_module)
+            )
             return diagnostics
 
         bindings: set[str] = set()
         for block in blocks:
-            block_diags = await self._analyze_code(block.code, ctx_data, gvar_resolver, bindings)
+            block_diags = await self._analyze_code(
+                block.code, ctx_data, gvar_resolver, bindings, treat_as_module=treat_as_module
+            )
             diagnostics.extend(_shift_diagnostics(block_diags, block.line_offset, block.char_offset))
         return diagnostics
 
@@ -68,6 +72,8 @@ class DiagnosticProvider:
         ctx_data: ContextData,
         gvar_resolver: GVarResolver,
         bindings: set[str] | None = None,
+        *,
+        treat_as_module: bool = False,
     ) -> List[types.Diagnostic]:
         diagnostics: list[types.Diagnostic] = []
         parser = draconic.DraconicInterpreter()
@@ -87,7 +93,11 @@ class DiagnosticProvider:
             return diagnostics
 
         diagnostics.extend(_make_diagnostic(node, message, "error") for node, message in unsupported_syntax(body))
-        diagnostics.extend(self._check_unknown_names(body, ctx_data, self._settings.semantic_level, bindings))
+        diagnostics.extend(
+            self._check_unknown_names(
+                body, ctx_data, self._settings.semantic_level, bindings, treat_as_module=treat_as_module
+            )
+        )
         diagnostics.extend(await _check_gvars(body, gvar_resolver, self._settings))
         diagnostics.extend(_check_imports(body, self._settings.semantic_level))
         diagnostics.extend(_check_call_args(body, self._builtin_signatures, self._settings.semantic_level))
@@ -103,8 +113,10 @@ class DiagnosticProvider:
         ctx_data: ContextData,
         severity_level: str,
         bindings: set[str] | None = None,
+        *,
+        treat_as_module: bool = False,
     ) -> List[types.Diagnostic]:
-        known: Set[str] = set(self._executor.available_names(ctx_data))
+        known: Set[str] = set(self._executor.available_names(ctx_data, treat_as_module=treat_as_module))
         known.update(bindings or ())
         diagnostics: list[types.Diagnostic] = []
         # A top-level function's body is evaluated only when it is called, by

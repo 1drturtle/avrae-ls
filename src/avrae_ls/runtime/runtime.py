@@ -352,7 +352,7 @@ class MockExecutor:
         self._enable_ast_cache = _EXECUTOR_ENABLE_AST_CACHE
         self._ast_cache: OrderedDict[str, tuple[str, list[Any]]] = OrderedDict()
 
-    def available_names(self, ctx_data: ContextData) -> Set[str]:
+    def available_names(self, ctx_data: ContextData, *, treat_as_module: bool = False) -> Set[str]:
         builtin_names = set(draconic.DraconicConfig().default_names) | set(self._base_builtins)
         runtime_names = {
             "ctx",
@@ -389,7 +389,7 @@ class MockExecutor:
             "signature",
             "verify_signature",
         }
-        variable_names = set(ctx_data.vars.to_initial_names().keys())
+        variable_names = set() if treat_as_module else set(ctx_data.vars.to_initial_names())
         return builtin_names | runtime_names | variable_names
 
     def create_session(
@@ -650,16 +650,9 @@ class MockExecutor:
             key = str(key)
             interp = interpreter_ref.get("interpreter")
             if interp is not None:
-                names = getattr(interp, "_names", {})
+                names = interp.names
                 if key in names:
                     return True, names[key]
-
-            if key in var_store.cvars:
-                return True, var_store.cvars[key]
-
-            if key in var_store.uvars:
-                return True, var_store.uvars[key]
-
             return False, None
 
         def _exists(name: str) -> bool:
