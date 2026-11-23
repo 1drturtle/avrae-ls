@@ -81,6 +81,7 @@ Language Server Protocol (LSP) implementation targeting Avrae-style draconic ali
 - Mock execution never writes back to Avrae: cvar/uvar/gvar mutations only live for the current run and reset before the next.
 - Network is limited to gvar fetches (when `enableGvarFetch` is true) and `verify_signature`; other Avrae/Discord calls are replaced with mocked context data from `.avraels.json`.
 - `get_gvar`/`using` values are pulled from local var files first; remote fetches go to `https://api.avrae.io/customizations/gvars/<id>` (or your `avraeService.baseUrl`) using `avraeService.token` and are cached for the session. In var files, a gvar can be a direct value, a `{ "value": "..." }` object, or a `{ "filePath": "relative/or/absolute/path" }` object (also supports `"path"`). Add `"scriptWritable": true` to either object form to allow `set_gvar(...)` during mock execution.
+- Saving a file-backed gvar source in VS Code reloads that source the next time it is used. Use **Avrae: Reload Workspace Config** to pick up changes made outside VS Code.
 - Mock scripting now supports `create_gvar(value, script_writable=False)` and `set_gvar(address, value)`. Gvar writes only affect the current run; they do not persist to Avrae or local var files.
 - `signature()` returns a mock string (`mock-signature:<int>`). `verify_signature()` POSTs to `/bot/signature/verify`, reuses the last successful response per signature, and includes `avraeService.token` if present.
 

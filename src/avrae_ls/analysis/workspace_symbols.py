@@ -86,19 +86,16 @@ def same_location(a: types.Location, b: types.Location) -> bool:
 
 def navigation_resolver(resolver: GVarResolver, config, documents) -> GVarResolver:
     """Overlay live local module text without mutating the execution cache."""
-    from avrae_ls.runtime.context import gvar_source_path, make_gvar_record, gvar_script_writable
+    from avrae_ls.runtime.context import GVAR_VALUE_KEY, gvar_source_path
 
     snapshot = resolver.snapshot()
     for key, record in snapshot.items():
         path = gvar_source_path(record)
         if path is None:
             continue
-        try:
-            document = documents.get(path.as_uri())
-            source = document.source if document is not None else path.read_text()
-        except (OSError, UnicodeError):
-            continue
-        snapshot[key] = make_gvar_record(source, source_path=path, script_writable=gvar_script_writable(record))
+        document = documents.get(path.as_uri())
+        if document is not None:
+            snapshot[key][GVAR_VALUE_KEY] = document.source
     overlay = GVarResolver(config)
     overlay.load_snapshot(snapshot)
     return overlay

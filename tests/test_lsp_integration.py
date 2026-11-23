@@ -9,6 +9,8 @@ from avrae_ls.lsp.server import (
     AvraeLanguageServer,
     _prefetch_modules,
     _runtime_diagnostic_with_source,
+    did_change_watched_files,
+    get_gvar_content,
     on_completion,
     on_definition,
     on_hover,
@@ -200,6 +202,7 @@ def test_hover_round_trip_integration():
     )
     hover = on_hover(server, params)
     assert hover is not None
+    assert isinstance(hover.contents, types.MarkupContent)
     assert "AliasSpellbook" in hover.contents.value
 
 
@@ -215,9 +218,38 @@ async def test_run_alias_returns_structured_module_error_details(tmp_path: Path)
     result = await run_alias(server, {"text": '!alias boom echo <drac2>using(outer="outer")</drac2>'})
 
     assert result["error"].startswith("Error in module outer -> inner at line 2:")
-    assert result["errorDetails"]["module"] == "inner"
-    assert result["errorDetails"]["module_line"] == 2
-    assert result["errorDetails"]["import_chain"] == ["outer", "inner"]
+    details = result["errorDetails"]
+    assert isinstance(details, dict)
+    assert details["module"] == "inner"
+    assert details["module_line"] == 2
+    assert details["import_chain"] == ["outer", "inner"]
+
+
+@pytest.mark.asyncio
+async def test_gvar_source_save_updates_preview_and_editor_lookups(tmp_path: Path):
+    (tmp_path / ".avraels.json").write_text('{"varFiles":["vars.json"]}')
+    (tmp_path / "vars.json").write_text('{"gvars":{"local":{"filePath":"helper.txt"}}}')
+    helper = tmp_path / "helper.txt"
+    helper.write_text("answer = 'old'\n")
+    server = AvraeLanguageServer()
+    server.load_workspace(tmp_path)
+    source = '<drac2>using(lib="local")\nreturn lib.answer</drac2>'
+    payload = {"text": f"!alias example echo {source}"}
+    assert (await run_alias(server, payload))["command"] == "echo old"
+    assert await get_gvar_content(server, {"id": "local"}) == {"content": "answer = 'old'\n"}
+    server.state.module_resolver.seed({"remote": "unrelated cached module"})
+
+    helper.write_text("answer = 'new'\n")
+    did_change_watched_files(
+        server,
+        types.DidChangeWatchedFilesParams(
+            changes=[types.FileEvent(uri=helper.as_uri(), type=types.FileChangeType.Changed)]
+        ),
+    )
+
+    assert (await run_alias(server, payload))["command"] == "echo new"
+    assert await get_gvar_content(server, {"id": "local"}) == {"content": "answer = 'new'\n"}
+    assert await get_gvar_content(server, {"id": "remote"}) == {"content": "unrelated cached module"}
 
 
 @pytest.mark.asyncio

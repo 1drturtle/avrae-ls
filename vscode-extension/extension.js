@@ -3,7 +3,7 @@ const { execFile } = require("child_process");
 const { accessSync, constants } = require("fs");
 const path = require("path");
 const { gvarIdFromUriPath } = require("./gvar-uri");
-const { LanguageClient, TransportKind, Executable } = require("vscode-languageclient/node");
+const { DidChangeWatchedFilesNotification, FileChangeType, LanguageClient, TransportKind, Executable } = require("vscode-languageclient/node");
 const { bundledSitePackages, isCompatiblePythonVersion, resolveServerLaunch } = require("./server-launcher");
 const { buildRunTestsInvocation, isTestFilePath, runTestFile } = require("./test-runner");
 
@@ -210,6 +210,15 @@ async function activate(context) {
 
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (doc) => {
+      if (doc.uri.scheme === "file") {
+        try {
+          await client.sendNotification(DidChangeWatchedFilesNotification.type, {
+            changes: [{ uri: doc.uri.toString(), type: FileChangeType.Changed }],
+          });
+        } catch (err) {
+          client.outputChannel.appendLine(`Could not report file save to Avrae LS: ${err}`);
+        }
+      }
       if (doc.languageId !== "avrae") return;
       if (!previewPanel) return;
       await runAndRenderDocument(doc);

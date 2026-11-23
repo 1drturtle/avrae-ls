@@ -228,7 +228,7 @@ async def test_refresh_fetches_multiple_when_enabled(monkeypatch):
 
     class DummyClient:
         def __init__(self, **kwargs):
-            captured["client_kwargs"] = kwargs
+            pass
 
         async def __aenter__(self):
             return self
@@ -339,6 +339,94 @@ def test_context_builder_preserves_script_writable_on_gvar_entries(tmp_path: Pat
         GVAR_SCRIPT_WRITABLE_KEY: True,
         GVAR_SOURCE_PATH_KEY: str(gvar_file),
     }
+
+
+def test_context_builder_reuses_loaded_sources_until_individually_invalidated(tmp_path: Path, monkeypatch):
+    files = [tmp_path / f"mod{index}.gvar" for index in range(150)]
+    for file in files:
+        file.write_text(file.stem)
+    var_file = tmp_path / "gvars.json"
+    entries: dict[str, dict[str, str | bool]] = {file.stem: {"filePath": file.name} for file in files}
+    entries["duplicate"] = {"path": files[0].name, "scriptWritable": True}
+    var_file.write_text(json.dumps({"gvars": entries}))
+
+    cfg = AvraeLSConfig.default(tmp_path)
+    cfg.var_files = (var_file,)
+    builder = ContextBuilder(cfg)
+    reads: list[Path] = []
+    resolutions: list[Path] = []
+    read_text = Path.read_text
+    resolve = Path.resolve
+
+    def count_reads(path, *args, **kwargs):
+        if path.suffix == ".gvar":
+            reads.append(path)
+        return read_text(path, *args, **kwargs)
+
+    def count_resolutions(path, *args, **kwargs):
+        if path.suffix == ".gvar":
+            resolutions.append(path)
+        return resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", count_reads)
+    monkeypatch.setattr(Path, "resolve", count_resolutions)
+
+    baseline = builder.build_baseline()
+    assert reads == resolutions == files
+    reads.clear()
+    resolutions.clear()
+
+    context = builder.build()
+    resolver = builder.gvar_resolver
+    resolver.load_snapshot(resolver.snapshot())
+    resolver.seed(context.vars.gvars)
+    resolver.set_value("duplicate", "mock write")
+    assert resolver.get_local("duplicate") == "mock write"
+    assert resolver.is_script_writable("duplicate")
+    assert baseline.vars.gvars["duplicate"][GVAR_VALUE_KEY] == files[0].stem
+    assert not builder.invalidate_gvar_source(tmp_path / "unrelated.txt")
+    assert builder.build_baseline() is baseline
+    assert reads == resolutions == []
+
+    files[0].write_text("new source")
+    assert builder.invalidate_gvar_source(files[0])
+    assert reads == resolutions == []
+    gvars = builder.build().vars.gvars
+    assert gvars[files[0].stem][GVAR_VALUE_KEY] == gvars["duplicate"][GVAR_VALUE_KEY] == "new source"
+    assert gvars["duplicate"][GVAR_SCRIPT_WRITABLE_KEY] is True
+    assert reads == resolutions == [files[0]]
+
+
+def test_context_builder_invalidates_profile_source_by_configured_or_canonical_path(tmp_path: Path):
+    linked = tmp_path / "linked.gvar"
+    target = tmp_path / "target.gvar"
+    linked.symlink_to(target)
+    cfg = AvraeLSConfig.default(tmp_path)
+    cfg.profiles[cfg.default_profile].vars.gvars.update(
+        {"module": {"filePath": linked.name}, "direct": {"filePath": target.name}}
+    )
+    builder = ContextBuilder(cfg)
+
+    assert "module" not in builder.build().vars.gvars
+    target.write_text("first value")
+    assert builder.invalidate_gvar_source(target)
+    gvar = builder.build().vars.gvars["module"]
+    assert gvar[GVAR_VALUE_KEY] == "first value"
+    assert gvar[GVAR_SOURCE_PATH_KEY] == str(target)
+
+    linked.write_text("edited via link")
+    assert builder.invalidate_gvar_source(linked)
+    gvars = builder.build().vars.gvars
+    assert gvars["module"][GVAR_VALUE_KEY] == gvars["direct"][GVAR_VALUE_KEY] == "edited via link"
+
+    replacement = tmp_path / "replacement.gvar"
+    replacement.write_text("second value")
+    linked.unlink()
+    linked.symlink_to(replacement)
+    assert builder.invalidate_gvar_source(linked)
+    gvar = builder.build().vars.gvars["module"]
+    assert gvar[GVAR_VALUE_KEY] == "second value"
+    assert gvar[GVAR_SOURCE_PATH_KEY] == str(replacement)
 
 
 @pytest.mark.asyncio

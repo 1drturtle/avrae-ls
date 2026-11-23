@@ -6,8 +6,9 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, Iterable, Tuple, cast
+from typing import Any, Callable, Dict, Iterable, Tuple, cast
 
 import httpx
 
@@ -21,11 +22,32 @@ GVAR_SCRIPT_WRITABLE_KEY = "scriptWritable"
 GVAR_SOURCE_PATH_KEY = "sourcePath"
 
 
+class _GVarRecord(dict[str, Any]):
+    """A normalized record whose source path is already canonical."""
+
+    def copy(self) -> _GVarRecord:
+        return _GVarRecord(self)
+
+
+@dataclass(frozen=True)
+class _GVarSource:
+    path: Path
+    content: str | OSError | UnicodeError | RuntimeError
+
+
+def _read_gvar_source(path: Path, *, cached_contents: dict[Path, _GVarSource] | None = None) -> _GVarSource:
+    canonical_path = path
+    try:
+        canonical_path = path.resolve()
+        if cached_contents is not None and canonical_path in cached_contents:
+            return cached_contents[canonical_path]
+        return _GVarSource(canonical_path, canonical_path.read_text())
+    except (OSError, UnicodeError, RuntimeError) as exc:
+        return _GVarSource(canonical_path, exc.with_traceback(None))
+
+
 def make_gvar_record(value: Any, *, script_writable: bool = False, source_path: Path | None = None) -> Dict[str, Any]:
-    record = {
-        GVAR_VALUE_KEY: value,
-        GVAR_SCRIPT_WRITABLE_KEY: bool(script_writable),
-    }
+    record = _GVarRecord({GVAR_VALUE_KEY: value, GVAR_SCRIPT_WRITABLE_KEY: bool(script_writable)})
     if source_path is not None:
         record[GVAR_SOURCE_PATH_KEY] = str(source_path.resolve())
     return record
@@ -58,7 +80,10 @@ def normalize_gvar_entry(
     *,
     relative_to: Path | None = None,
     source_label: Path | None = None,
+    load_source: Callable[[Path], _GVarSource] = _read_gvar_source,
 ) -> Dict[str, Any] | object:
+    if isinstance(value, _GVarRecord):
+        return value.copy()
     if isinstance(value, dict):
         script_writable = bool(value.get(GVAR_SCRIPT_WRITABLE_KEY, False))
         file_path = value.get("filePath")
@@ -71,26 +96,22 @@ def normalize_gvar_entry(
             gvar_path = Path(file_path)
             if not gvar_path.is_absolute() and relative_to is not None:
                 gvar_path = relative_to / gvar_path
-            try:
-                return make_gvar_record(gvar_path.read_text(), script_writable=script_writable, source_path=gvar_path)
-            except FileNotFoundError:
+            source = load_source(gvar_path)
+            if isinstance(source.content, FileNotFoundError):
                 log.warning("Gvar content file not found for '%s': %s", key, gvar_path)
                 return _SKIP_GVAR
-            except OSError as exc:
-                log.warning("Failed to read gvar content file for '%s' (%s): %s", key, gvar_path, exc)
+            if not isinstance(source.content, str):
+                log.warning("Failed to read gvar content file for '%s' (%s): %s", key, gvar_path, source.content)
                 return _SKIP_GVAR
+            record = make_gvar_record(source.content, script_writable=script_writable)
+            record[GVAR_SOURCE_PATH_KEY] = str(source.path)
+            return record
         if GVAR_VALUE_KEY in value or GVAR_SCRIPT_WRITABLE_KEY in value:
             return make_gvar_record(
                 value.get(GVAR_VALUE_KEY),
                 script_writable=script_writable,
                 source_path=gvar_source_path(value),
             )
-    if isinstance(value, dict) and GVAR_VALUE_KEY in value:
-        return make_gvar_record(
-            value.get(GVAR_VALUE_KEY),
-            script_writable=gvar_script_writable(value),
-            source_path=gvar_source_path(value),
-        )
     return make_gvar_record(value, script_writable=False)
 
 
@@ -99,10 +120,13 @@ def normalize_gvars(
     *,
     relative_to: Path | None = None,
     source_label: Path | None = None,
+    load_source: Callable[[Path], _GVarSource] = _read_gvar_source,
 ) -> Dict[str, Dict[str, Any]]:
     normalized: dict[str, Dict[str, Any]] = {}
     for key, value in (gvars or {}).items():
-        parsed = normalize_gvar_entry(key, value, relative_to=relative_to, source_label=source_label)
+        parsed = normalize_gvar_entry(
+            key, value, relative_to=relative_to, source_label=source_label, load_source=load_source
+        )
         if parsed is _SKIP_GVAR:
             continue
         normalized[str(key)] = cast(Dict[str, Any], parsed)
@@ -125,7 +149,7 @@ class ContextData:
 @dataclass(frozen=True)
 class _BaselineCacheEntry:
     context: ContextData
-    var_file_sig: Tuple[tuple[str, int, int], ...]
+    sources: set[Path]
 
 
 class ContextBuilder:
@@ -133,6 +157,10 @@ class ContextBuilder:
         self._config = config
         self._gvar_resolver = GVarResolver(config)
         self._baseline_cache: dict[str, _BaselineCacheEntry] = {}
+        self._manifest_signature: Tuple[tuple[str, int, int], ...] | None = None
+        self._gvar_sources: dict[Path, _GVarSource] = {}
+        self._gvar_contents: dict[Path, _GVarSource] = {}
+        self._source_aliases: dict[Path, set[Path]] = {}
 
     @property
     def gvar_resolver(self) -> "GVarResolver":
@@ -147,8 +175,14 @@ class ContextBuilder:
         profile = self._select_profile(profile_name)
         cache_key = profile.name
         var_file_sig = self._var_file_signature()
+        if var_file_sig != self._manifest_signature:
+            self._manifest_signature = var_file_sig
+            self._baseline_cache.clear()
+            self._gvar_sources.clear()
+            self._gvar_contents.clear()
+            self._source_aliases.clear()
         cached = self._baseline_cache.get(cache_key)
-        if cached is not None and cached.var_file_sig == var_file_sig:
+        if cached is not None:
             return cached.context
 
         # Clone profile payload once; per-run contexts are cloned from this baseline.
@@ -157,7 +191,17 @@ class ContextBuilder:
         profile_ctx = _fast_clone(profile.ctx)
 
         combat = self._ensure_me_combatant(profile_combat, profile_character, profile_ctx.get("author"))
-        merged_vars = self._merge_character_cvars(profile_character, self._load_var_files().merge(profile.vars))
+        sources: set[Path] = set()
+        load_source = partial(self._load_gvar_source, dependencies=sources)
+        merged_vars = self._merge_character_cvars(
+            profile_character, self._load_var_files(load_source).merge(profile.vars)
+        )
+        merged_vars.gvars = normalize_gvars(
+            merged_vars.gvars,
+            relative_to=self._config.workspace_root,
+            source_label=self._config.workspace_root,
+            load_source=load_source,
+        )
         baseline = ContextData(
             ctx=profile_ctx,
             combat=combat,
@@ -165,7 +209,7 @@ class ContextBuilder:
             vars=merged_vars,
             time=profile.time,
         )
-        self._baseline_cache[cache_key] = _BaselineCacheEntry(context=baseline, var_file_sig=var_file_sig)
+        self._baseline_cache[cache_key] = _BaselineCacheEntry(context=baseline, sources=sources)
         log.debug(
             "Context baseline built for profile '%s' in %.2fms",
             profile.name,
@@ -185,7 +229,10 @@ class ContextBuilder:
             cvars=dict(baseline.vars.cvars),
             uvars=dict(baseline.vars.uvars),
             svars=dict(baseline.vars.svars),
-            gvars=dict(baseline.vars.gvars),
+            gvars={
+                key: value.copy() if isinstance(value, _GVarRecord) else value
+                for key, value in baseline.vars.gvars.items()
+            },
         )
         self._gvar_resolver.reset(vars_copy.gvars)
         ctx_data = ContextData(
@@ -205,13 +252,48 @@ class ContextBuilder:
             return self._config.profiles[self._config.default_profile]
         return next(iter(self._config.profiles.values()))
 
-    def _load_var_files(self) -> VarSources:
+    def invalidate_gvar_source(self, path: Path) -> bool:
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        source = self._gvar_sources.get(path)
+        canonical_paths = {path} if source is None else {path, source.path}
+        affected: set[Path] = set()
+        for canonical_path in canonical_paths:
+            affected.update(self._source_aliases.pop(canonical_path, set()))
+            self._gvar_contents.pop(canonical_path, None)
+        if not affected:
+            return False
+
+        for configured_path in affected:
+            del self._gvar_sources[configured_path]
+        self._baseline_cache = {
+            name: entry for name, entry in self._baseline_cache.items() if entry.sources.isdisjoint(affected)
+        }
+        return True
+
+    def _load_gvar_source(self, path: Path, *, dependencies: set[Path]) -> _GVarSource:
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        dependencies.add(path)
+        source = self._gvar_sources.get(path)
+        if source is None:
+            source = _read_gvar_source(path, cached_contents=self._gvar_contents)
+            self._gvar_sources[path] = source
+            self._gvar_contents[source.path] = source
+            self._source_aliases.setdefault(source.path, set()).add(path)
+        return source
+
+    def _load_var_files(self, load_source: Callable[[Path], _GVarSource]) -> VarSources:
         merged = VarSources()
         for path in self._config.var_files:
             data = _read_json_file(path)
             if data is None:
                 continue
-            merged = merged.merge(_var_sources_from_file(path, data))
+            parsed = VarSources.from_data(data)
+            parsed.gvars = normalize_gvars(
+                parsed.gvars, relative_to=path.parent, source_label=path, load_source=load_source
+            )
+            merged = merged.merge(parsed)
         return merged
 
     def _var_file_signature(self) -> Tuple[tuple[str, int, int], ...]:
@@ -233,9 +315,6 @@ class ContextBuilder:
         builtin_cvars = derive_character_cvars(character)
         if builtin_cvars:
             merged = merged.merge(VarSources(cvars=builtin_cvars))
-        merged.gvars = normalize_gvars(
-            merged.gvars, relative_to=self._config.workspace_root, source_label=self._config.workspace_root
-        )
         return merged
 
     def _ensure_me_combatant(
@@ -391,6 +470,9 @@ class GVarResolver:
     def get_local(self, key: str) -> Any:
         return gvar_value(self._cache.get(str(key)))
 
+    def discard(self, key: str) -> None:
+        self._cache.pop(key, None)
+
     def get_record(self, key: str) -> Dict[str, Any] | None:
         entry = self._cache.get(str(key))
         if entry is None:
@@ -491,7 +573,7 @@ class GVarResolver:
 
     def snapshot(self) -> Dict[str, Any]:
         return {
-            str(key): dict(value) if isinstance(value, dict) else make_gvar_record(value, script_writable=False)
+            str(key): value.copy() if isinstance(value, dict) else make_gvar_record(value, script_writable=False)
             for key, value in self._cache.items()
         }
 
@@ -563,24 +645,6 @@ def _read_json_file(path: Path) -> Dict[str, Any] | None:
     except json.JSONDecodeError as exc:
         log.warning("Failed to parse var file %s: %s", path, exc)
         return None
-
-
-def _var_sources_from_file(path: Path, data: Dict[str, Any]) -> VarSources:
-    parsed = VarSources.from_data(data)
-    return VarSources(
-        cvars=parsed.cvars,
-        uvars=parsed.uvars,
-        svars=parsed.svars,
-        gvars=_resolve_gvar_file_refs(path, parsed.gvars),
-    )
-
-
-def _resolve_gvar_file_refs(var_file: Path, gvars: Dict[str, Any]) -> Dict[str, Any]:
-    return normalize_gvars(gvars, relative_to=var_file.parent, source_label=var_file)
-
-
-def _parse_gvar_value(var_file: Path, key: Any, value: Any) -> Any:
-    return normalize_gvar_entry(key, value, relative_to=var_file.parent, source_label=var_file)
 
 
 def _fast_clone(value: Any) -> Any:

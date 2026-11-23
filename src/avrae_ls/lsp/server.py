@@ -64,6 +64,27 @@ class ServerState:
     executor: MockExecutor
     module_resolver: GVarResolver
     warnings: list[str] = field(default_factory=list)
+    module_gvars: dict[str, Any] | None = None
+    module_profile: str | None = None
+    module_gvars_stale: bool = False
+
+    def sync_module_gvars(self, gvars: dict[str, Any], profile: str | None) -> GVarResolver:
+        previous = self.module_gvars or {}
+        for key in previous.keys() - gvars.keys():
+            self.module_resolver.discard(key)
+        self.module_resolver.seed(
+            {key: value for key, value in gvars.items() if key not in previous or previous[key] != value}
+        )
+        self.module_gvars = gvars
+        self.module_profile = profile
+        self.module_gvars_stale = False
+        return self.module_resolver
+
+    def current_module_resolver(self) -> GVarResolver:
+        if self.module_gvars is None or self.module_gvars_stale:
+            baseline = self.context_builder.build_baseline(self.module_profile)
+            return self.sync_module_gvars(baseline.vars.gvars, self.module_profile)
+        return self.module_resolver
 
 
 class AvraeLanguageServer(LanguageServer):
@@ -144,6 +165,15 @@ async def did_save(server: AvraeLanguageServer, params: types.DidSaveTextDocumen
     await _publish_diagnostics(server, params.text_document.uri)
 
 
+@ls.feature(types.WORKSPACE_DID_CHANGE_WATCHED_FILES)
+def did_change_watched_files(server: AvraeLanguageServer, params: types.DidChangeWatchedFilesParams) -> None:
+    state = server.state
+    for change in params.changes:
+        path = uris.to_fs_path(change.uri)
+        if path is not None and state.context_builder.invalidate_gvar_source(Path(path)):
+            state.module_gvars_stale = True
+
+
 @ls.feature(types.WORKSPACE_DID_CHANGE_CONFIGURATION)
 async def did_change_config(server: AvraeLanguageServer, params: types.DidChangeConfigurationParams):
     server.load_workspace(server.workspace_root)
@@ -161,7 +191,9 @@ def on_document_symbol(server: AvraeLanguageServer, params: types.DocumentSymbol
 @ls.feature(types.TEXT_DOCUMENT_DEFINITION)
 def on_definition(server: AvraeLanguageServer, params: types.DefinitionParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
-    resolver = navigation_resolver(server.state.module_resolver, server.state.config, server.workspace.text_documents)
+    resolver = navigation_resolver(
+        server.state.current_module_resolver(), server.state.config, server.workspace.text_documents
+    )
     is_module = _is_alias_module_document(doc)
     for rng, target in module_references(doc.source, is_module, resolver):
         if (
@@ -176,9 +208,11 @@ def on_definition(server: AvraeLanguageServer, params: types.DefinitionParams):
     return types.Location(uri=params.text_document.uri, range=binding.declarations[0])
 
 
-def _symbol_locations(server, params, *, include_declaration=True, new_name=None):
+def _symbol_locations(server: AvraeLanguageServer, params, *, include_declaration=True, new_name=None):
     doc = server.workspace.get_text_document(params.text_document.uri)
-    resolver = navigation_resolver(server.state.module_resolver, server.state.config, server.workspace.text_documents)
+    resolver = navigation_resolver(
+        server.state.current_module_resolver(), server.state.config, server.workspace.text_documents
+    )
     is_module = _is_alias_module_document(doc)
     index = build_binding_index(doc.source, treat_as_module=is_module)
     binding = index.at(params.position)
@@ -312,7 +346,7 @@ def on_completion(server: AvraeLanguageServer, params: types.CompletionParams):
     if selected is None:
         return []
     code, rel_line, rel_char = selected
-    modules = module_exports_for_code(code, server.state.module_resolver)
+    modules = module_exports_for_code(code, server.state.current_module_resolver())
     return completion_items_for_position(code, rel_line, rel_char, suggestions, modules)
 
 
@@ -430,15 +464,18 @@ async def refresh_gvars(server: AvraeLanguageServer, *args: Any):
         if isinstance(raw_keys, list):
             keys = [str(k) for k in raw_keys]
 
-    ctx_data = server.state.context_builder.build(profile)
-    resolver = server.state.context_builder.gvar_resolver
-    snapshot = await resolver.refresh(ctx_data.vars.gvars, keys)
+    state = server.state
+    ctx_data = state.context_builder.build(profile)
     # The editor-facing resolver owns the virtual GVAR documents and module
     # symbol cache. Rebuild it too, so Refresh GVARs cannot leave definitions
     # and virtual documents pointing at stale remote content.
-    server.state.module_resolver.reset(ctx_data.vars.gvars)
+    state.module_resolver.reset(ctx_data.vars.gvars)
+    state.module_gvars = ctx_data.vars.gvars
+    state.module_profile = profile
+    state.module_gvars_stale = False
+    snapshot = await state.context_builder.gvar_resolver.refresh(ctx_data.vars.gvars, keys)
     if keys:
-        await server.state.module_resolver.ensure_many(keys)
+        await state.current_module_resolver().ensure_many(keys)
     return {"count": len(snapshot), "gvars": snapshot}
 
 
@@ -448,8 +485,9 @@ async def get_gvar_content(server: AvraeLanguageServer, *args: Any):
     gvar_id = str(payload.get("id", "")) if isinstance(payload, dict) else ""
     if not gvar_id:
         return {"content": None}
-    await server.state.module_resolver.ensure(gvar_id)
-    content = server.state.module_resolver.get_local(gvar_id)
+    resolver = server.state.current_module_resolver()
+    await resolver.ensure(gvar_id)
+    content = resolver.get_local(gvar_id)
     return {"content": content if isinstance(content, str) else None}
 
 
@@ -461,9 +499,9 @@ def reload_config(server: AvraeLanguageServer, *args: Any):
 
 async def _prefetch_modules(server: AvraeLanguageServer, source: str) -> None:
     """Warm the editor-only module resolver without delaying completion requests."""
-    ctx_data = server.state.context_builder.build()
-    resolver = server.state.module_resolver
-    resolver.seed(ctx_data.vars.gvars)
+    state = server.state
+    baseline = state.context_builder.build_baseline()
+    resolver = state.sync_module_gvars(baseline.vars.gvars, None)
     source_ctx = build_source_context(source, False)
     keys: set[str] = set()
     blocks = source_ctx.blocks or []
