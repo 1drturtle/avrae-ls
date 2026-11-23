@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,13 +31,13 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: vscode-extension/package-lock.json
 
       - name: Build VS Code extension and bundled server (VSIX)
         id: build_vsce
-        run: make vsix
+        run: make vsix VSCE="npx @vscode/vsce"
 
       - name: Create draft release
         if: ${{ success() && steps.build_python.outcome == 'success' &&
@@ -57,15 +58,8 @@ jobs:
       - name: Publish VS Code extension
         if: ${{ success() && steps.build_python.outcome == 'success' &&
           steps.build_vsce.outcome == 'success' }}
-        env:
-          VSCE_PAT: ${{ secrets.VSCODE_PAT }}
         working-directory: vscode-extension
-        run: |
-          if [ -z "${VSCE_PAT}" ]; then
-            echo "VSCE_PAT is not set" >&2
-            exit 1
-          fi
-          npx vsce publish --packagePath ../dist/avrae-ls-client.vsix
+        run: npx @vscode/vsce publish --oidc --packagePath ../dist/avrae-ls-client.vsix
 
       - name: Publish to PyPI
         if: ${{ success() && steps.build_python.outcome == 'success' &&
