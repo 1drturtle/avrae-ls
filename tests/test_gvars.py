@@ -1,6 +1,8 @@
+import asyncio
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 from avrae_ls.config import AvraeLSConfig
@@ -73,6 +75,39 @@ async def test_refresh_gvars_command_refreshes_virtual_module_cache(monkeypatch)
     await refresh_gvars(server, {"keys": ["remote"]})
 
     assert server.state.module_resolver.get_local("remote") == "fresh module"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("request_failed", [False, True])
+async def test_pending_remote_gvar_fetch_preserves_new_local_value(
+    monkeypatch: pytest.MonkeyPatch, request_failed: bool
+):
+    cfg = AvraeLSConfig.default(Path("."))
+    cfg.enable_gvar_fetch = True
+    cfg.service.token = "token"
+    cfg.silent_gvar_fetch = True
+    resolver = GVarResolver(cfg)
+    request_started = asyncio.Event()
+    finish_request = asyncio.Event()
+
+    async def get(client: httpx.AsyncClient, url: str, **kwargs: object) -> httpx.Response:
+        request_started.set()
+        await finish_request.wait()
+        if request_failed:
+            raise httpx.ReadError("request failed")
+        return httpx.Response(200, json={"value": "remote module"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", get)
+    pending = asyncio.create_task(resolver.ensure("module"))
+    try:
+        await asyncio.wait_for(request_started.wait(), timeout=2)
+        resolver.seed({"module": "local module"})
+    finally:
+        finish_request.set()
+        fetched = await pending
+
+    assert fetched
+    assert resolver.get_local("module") == "local module"
 
 
 @pytest.mark.asyncio

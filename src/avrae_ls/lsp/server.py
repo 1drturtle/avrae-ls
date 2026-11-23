@@ -169,8 +169,11 @@ async def did_save(server: AvraeLanguageServer, params: types.DidSaveTextDocumen
 def did_change_watched_files(server: AvraeLanguageServer, params: types.DidChangeWatchedFilesParams) -> None:
     state = server.state
     for change in params.changes:
-        path = uris.to_fs_path(change.uri)
-        if path is not None and state.context_builder.invalidate_gvar_source(Path(path)):
+        fs_path = uris.to_fs_path(change.uri)
+        if fs_path is None:
+            continue
+        path = Path(fs_path)
+        if state.context_builder.invalidate_var_file(path) or state.context_builder.invalidate_gvar_source(path):
             state.module_gvars_stale = True
 
 

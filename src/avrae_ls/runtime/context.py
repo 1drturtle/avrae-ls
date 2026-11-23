@@ -7,6 +7,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from functools import partial
+from os.path import abspath
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Tuple, cast
 
@@ -51,6 +52,9 @@ def make_gvar_record(value: Any, *, script_writable: bool = False, source_path: 
     if source_path is not None:
         record[GVAR_SOURCE_PATH_KEY] = str(source_path.resolve())
     return record
+
+
+_SILENT_GVAR_FAILURE = make_gvar_record(None)
 
 
 def gvar_value(entry: Any) -> Any:
@@ -252,6 +256,13 @@ class ContextBuilder:
             return self._config.profiles[self._config.default_profile]
         return next(iter(self._config.profiles.values()))
 
+    def invalidate_var_file(self, path: Path) -> bool:
+        absolute_path = abspath(path)
+        if not any(absolute_path == abspath(var_file) for var_file in self._config.var_files):
+            return False
+        self._manifest_signature = None
+        return True
+
     def invalidate_gvar_source(self, path: Path) -> bool:
         if not path.is_absolute():
             path = Path.cwd() / path
@@ -402,7 +413,7 @@ class GVarResolver:
     def _silent_failure(self, key: str) -> bool:
         if not self._config.silent_gvar_fetch:
             return False
-        self._cache[str(key)] = make_gvar_record(None, script_writable=False)
+        self._cache.setdefault(str(key), _SILENT_GVAR_FAILURE)
         return True
 
     def _silent_failure_many(self, keys: Iterable[str]) -> bool:
@@ -616,17 +627,21 @@ class GVarResolver:
             session = httpx.AsyncClient(timeout=5)
             close_client = True
 
+        resp = None
         try:
             log.debug("GVAR fetching %s from %s", key, url)
             resp = await _do_request(session)
         except Exception as exc:
             if not self._config.silent_gvar_fetch:
                 log.error("GVAR fetch failed for %s: %s", key, exc)
+        finally:
             if close_client:
                 await session.aclose()
+        cached = self._cache.get(key)
+        if cached is not None and cached is not _SILENT_GVAR_FAILURE:
+            return True
+        if resp is None:
             return self._silent_failure(key)
-        if close_client:
-            await session.aclose()
         return self._handle_gvar_response(key, resp, blocking=False)
 
 

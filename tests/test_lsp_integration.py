@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -249,6 +250,31 @@ async def test_gvar_source_save_updates_preview_and_editor_lookups(tmp_path: Pat
 
     assert (await run_alias(server, payload))["command"] == "echo new"
     assert await get_gvar_content(server, {"id": "local"}) == {"content": "answer = 'new'\n"}
+    assert await get_gvar_content(server, {"id": "remote"}) == {"content": "unrelated cached module"}
+
+
+@pytest.mark.asyncio
+async def test_var_manifest_save_updates_editor_gvars_with_unchanged_file_signature(tmp_path: Path):
+    (tmp_path / ".avraels.json").write_text('{"varFiles":["vars.json"]}')
+    manifest = tmp_path / "vars.json"
+    manifest.write_text('{"gvars":{"old":"first module"}}')
+    previous_stat = manifest.stat()
+    server = AvraeLanguageServer()
+    server.load_workspace(tmp_path)
+    assert await get_gvar_content(server, {"id": "old"}) == {"content": "first module"}
+    server.state.module_resolver.seed({"remote": "unrelated cached module"})
+
+    manifest.write_text('{"gvars":{"new":"saved module"}}')
+    os.utime(manifest, ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
+    did_change_watched_files(
+        server,
+        types.DidChangeWatchedFilesParams(
+            changes=[types.FileEvent(uri=manifest.as_uri(), type=types.FileChangeType.Changed)]
+        ),
+    )
+
+    assert await get_gvar_content(server, {"id": "old"}) == {"content": None}
+    assert await get_gvar_content(server, {"id": "new"}) == {"content": "saved module"}
     assert await get_gvar_content(server, {"id": "remote"}) == {"content": "unrelated cached module"}
 
 
